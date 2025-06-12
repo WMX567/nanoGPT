@@ -31,6 +31,7 @@ class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
         assert config.n_embd % config.n_head == 0
+        self.mup_multiplier = config.mup_multiplier if config.mup else 1
         # key, query, value projections for all heads, but in a batch
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
         # output projection
@@ -61,10 +62,13 @@ class CausalSelfAttention(nn.Module):
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
             # efficient attention using Flash Attention CUDA kernels
-            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
+            y = torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True,
+                scale = 1/k.size(-1)
+            )
         else:
             # manual implementation of attention
-            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+            att = (q @ k.transpose(-2, -1)) * (1.0 / (k.size(-1)))
             att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
             att = F.softmax(att, dim=-1)
             att = self.attn_dropout(att)
@@ -114,6 +118,9 @@ class GPTConfig:
     n_embd: int = 768
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    mup: bool = False
+    mup_multiplier: int = 1
+    init_std: float = 0.02
 
 class GPT(nn.Module):
 
@@ -122,6 +129,10 @@ class GPT(nn.Module):
         assert config.vocab_size is not None
         assert config.block_size is not None
         self.config = config
+
+        self.mup = config.mup
+        self.mup_multiplier = config.mup_multiplier
+        self.init_std = config.init_std
 
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
@@ -139,11 +150,7 @@ class GPT(nn.Module):
 
         # init all weights
         self.apply(self._init_weights)
-        # apply special scaled init to the residual projections, per GPT-2 paper
-        for pn, p in self.named_parameters():
-            if pn.endswith('c_proj.weight'):
-                torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
-
+        
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
 
@@ -160,12 +167,21 @@ class GPT(nn.Module):
         return n_params
 
     def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        if not self.mup:
+            if isinstance(module, nn.Linear):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+                if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.Embedding):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        else:
+            param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
+            for pn, p in param_dict.items():
+                if p.dim() >= 2:
+                    if pn.endswith('c_attn.weight') or pn.endswith('c_fc.weight') or pn.endswith('c_proj.weight'):
+                        nn.init.normal_(p, mean=0.0, std=self.init_std / math.sqrt(self.mup_multiplier))
+                    else:
+                        nn.init.normal_(p, mean=0.0, std=self.init_std / math.sqrt(2 * self.config.n_layer))
 
     def forward(self, idx, targets=None):
         device = idx.device
@@ -183,7 +199,7 @@ class GPT(nn.Module):
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)
+            logits = self.lm_head(x / self.mup_multiplier)
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
@@ -267,16 +283,29 @@ class GPT(nn.Module):
         param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
         # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
         # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
-        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
-        nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
+
+        mup_decay_params = []
+        decay_params = []
+        other_params = []
+        if self.config.mup:
+            for pn, p in param_dict.items():
+                if p.dim() >= 2:
+                    if pn.endswith('c_attn.weight') or pn.endswith('c_fc.weight') or pn.endswith('c_proj.weight'):
+                        mup_decay_params.append(p)
+                    else:
+                        decay_params.append(p)
+                else:
+                    other_params.append(p)
+
         optim_groups = [
-            {'params': decay_params, 'weight_decay': weight_decay},
-            {'params': nodecay_params, 'weight_decay': 0.0}
+            {'params': mup_decay_params, 'weight_decay': weight_decay, 'lr_scale': 1 / self.config.mup_multiplier},
+            {'params': decay_params, 'weight_decay': weight_decay, 'lr_scale': 1},
+            {'params': other_params, 'weight_decay': 0.0}
         ]
-        num_decay_params = sum(p.numel() for p in decay_params)
-        num_nodecay_params = sum(p.numel() for p in nodecay_params)
-        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
-        print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
+        # num_decay_params = sum(p.numel() for p in decay_params)
+        # num_nodecay_params = sum(p.numel() for p in nodecay_params)
+        # print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+        # print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == 'cuda'

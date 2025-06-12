@@ -20,6 +20,7 @@ import os
 import time
 import math
 import pickle
+import random
 from contextlib import nullcontext
 
 import numpy as np
@@ -28,6 +29,14 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
 from model import GPTConfig, GPT
+
+def seed_everything(seed=42):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
@@ -57,7 +66,7 @@ bias = False # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
 learning_rate = 6e-4 # max learning rate
 max_iters = 600000 # total number of training iterations
-weight_decay = 1e-1
+weight_decay = 0.0
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
@@ -72,6 +81,13 @@ backend = 'nccl' # 'nccl', 'gloo', etc.
 device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 compile = True # use PyTorch 2.0 to compile the model to be faster
+mup = True
+mup_multiplier = 1
+coord_check = False
+seed = 42
+bias = False
+init_std = 0.02
+coord_check = True
 # -----------------------------------------------------------------------------
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open('configurator.py').read()) # overrides from command line or config file
@@ -103,7 +119,8 @@ print(f"tokens per iteration will be: {tokens_per_iter:,}")
 
 if master_process:
     os.makedirs(out_dir, exist_ok=True)
-torch.manual_seed(1337 + seed_offset)
+# torch.manual_seed(1337 + seed_offset)
+seed_everything(seed + seed_offset) # set the random seed for reproducibility
 torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
 torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
 device_type = 'cuda' if 'cuda' in device else 'cpu' # for later use in torch.autocast
@@ -145,7 +162,8 @@ if os.path.exists(meta_path):
 
 # model init
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
-                  bias=bias, vocab_size=None, dropout=dropout) # start with model_args from command line
+                  bias=bias, vocab_size=None, dropout=dropout, mup=mup, 
+                  mup_multiplier=mup_multiplier, init_std=init_std) # start with model_args from command line
 if init_from == 'scratch':
     # init a new model from scratch
     print("Initializing a new model from scratch")
@@ -153,8 +171,45 @@ if init_from == 'scratch':
     if meta_vocab_size is None:
         print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
     model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 50304
+    print("MODEL ARGS:", model_args)
     gptconf = GPTConfig(**model_args)
     model = GPT(gptconf)
+
+    if coord_check:
+        from coordinate_checking import get_hooks
+        data = {}
+        hooks = []
+        for i, layer in enumerate(model.transformer.h):
+            mlp = layer.mlp
+
+            fc = mlp.c_fc
+            forward_hook = get_hooks(data, f"fc.{i}")
+            hook = fc.register_forward_hook(forward_hook)
+            hooks.append(hook)
+
+            c_proj = mlp.c_proj
+            forward_hook = get_hooks(data, f"c_proj.{i}")
+            hook = c_proj.register_forward_hook(forward_hook)
+            hooks.append(hook)
+
+            attn = layer.attn
+            forward_hook = get_hooks(data, f"attn.c_attn.{i}")
+            hook = attn.c_attn.register_forward_hook(forward_hook)
+            hooks.append(hook)
+
+            forward_hook = get_hooks(data, f"attn.c_proj.{i}")
+            hook = attn.c_proj.register_forward_hook(forward_hook)
+            hooks.append(hook)
+
+        forward_hook = get_hooks(data, f"lm_head")
+        hook = model.lm_head.register_forward_hook(forward_hook)
+        hooks.append(hook)
+        
+        # forward_hook = get_hooks(data, "output")
+        # hook = model.output_id.register_forward_hook(forward_hook)
+        # hooks.append(hook)
+        
+
 elif init_from == 'resume':
     print(f"Resuming training from {out_dir}")
     # resume training from a checkpoint.
@@ -229,6 +284,9 @@ def estimate_loss():
 
 # learning rate decay scheduler (cosine with warmup)
 def get_lr(it):
+    if coord_check:
+        return learning_rate
+    
     # 1) linear warmup for warmup_iters steps
     if it < warmup_iters:
         return learning_rate * (it + 1) / (warmup_iters + 1)
@@ -257,35 +315,35 @@ while True:
     # determine and set the learning rate for this iteration
     lr = get_lr(iter_num) if decay_lr else learning_rate
     for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
+        param_group['lr'] = lr * param_group.get('lr_scale', 1.0)
 
     # evaluate the loss on train/val sets and write checkpoints
-    if iter_num % eval_interval == 0 and master_process:
-        losses = estimate_loss()
-        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-        if wandb_log:
-            wandb.log({
-                "iter": iter_num,
-                "train/loss": losses['train'],
-                "val/loss": losses['val'],
-                "lr": lr,
-                "mfu": running_mfu*100, # convert to percentage
-            })
-        if losses['val'] < best_val_loss or always_save_checkpoint:
-            best_val_loss = losses['val']
-            if iter_num > 0:
-                checkpoint = {
-                    'model': raw_model.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'model_args': model_args,
-                    'iter_num': iter_num,
-                    'best_val_loss': best_val_loss,
-                    'config': config,
-                }
-                print(f"saving checkpoint to {out_dir}")
-                torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
-    if iter_num == 0 and eval_only:
-        break
+    # if iter_num % eval_interval == 0 and master_process:
+    #     losses = estimate_loss()
+    #     print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+    #     if wandb_log:
+    #         wandb.log({
+    #             "iter": iter_num,
+    #             "train/loss": losses['train'],
+    #             "val/loss": losses['val'],
+    #             "lr": lr,
+    #             "mfu": running_mfu*100, # convert to percentage
+    #         })
+    #     if losses['val'] < best_val_loss or always_save_checkpoint:
+    #         best_val_loss = losses['val']
+    #         if iter_num > 0:
+    #             checkpoint = {
+    #                 'model': raw_model.state_dict(),
+    #                 'optimizer': optimizer.state_dict(),
+    #                 'model_args': model_args,
+    #                 'iter_num': iter_num,
+    #                 'best_val_loss': best_val_loss,
+    #                 'config': config,
+    #             }
+    #             print(f"saving checkpoint to {out_dir}")
+    #             torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+    # if iter_num == 0 and eval_only:
+    #     break
 
     # forward backward update, with optional gradient accumulation to simulate larger batch size
     # and using the GradScaler if data type is float16
@@ -300,7 +358,7 @@ while True:
             logits, loss = model(X, Y)
             loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
-        X, Y = get_batch('train')
+        # X, Y = get_batch('train')
         # backward pass, with gradient scaling if training in fp16
         scaler.scale(loss).backward()
     # clip the gradient
@@ -331,6 +389,18 @@ while True:
     # termination conditions
     if iter_num > max_iters:
         break
+
+if coord_check:
+    import datetime
+    from coordinate_checking import dataframe_from_data
+    now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    
+    df = dataframe_from_data(data, width=config['n_embd'], seed=seed)
+    df.to_csv(os.path.join(out_dir, f'coord_check_{now}.csv'), index=False)
+    print(f"Attempted to save coordinate checking data to {os.path.join(out_dir, f'coord_check_{now}.csv')}")
+
+# Save losses!
+
 
 if ddp:
     destroy_process_group()
