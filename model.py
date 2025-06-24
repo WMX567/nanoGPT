@@ -9,29 +9,67 @@ https://github.com/huggingface/transformers/blob/main/src/transformers/models/gp
 
 import math
 import inspect
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from mup_implementations import standard_param_impl
+
+def normalization(config):
+    if config.normalization == "RMSNorm":
+        return RMSNorm(config)
+    elif config.normalization == "LayerNorm":
+        return LayerNorm(config)
+    else:
+        raise ValueError(f"Unknown normalization type: {config.normalization}. Supported: 'RMSNorm', 'LayerNorm'")
+
+class RMSNorm(nn.Module):
+    def __init__(self, config, eps=1e-3):
+        super().__init__()
+        ndim = config.n_embd
+        self.mup_multiplier = config.mup_multiplier if hasattr(config, 'mup_multiplier') else 1
+        self.weight = nn.Parameter(
+            torch.ones(ndim) / self.mup_multiplier
+        )
+        self.eps = eps
+
+    def forward(self, input):
+        mean = (input**2).mean(dim=-1, keepdim=True)
+        normed = input / torch.sqrt(mean + self.eps)
+        return self.mup_multiplier * self.weight * normed
+
+
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
 
-    def __init__(self, ndim, bias):
+    def __init__(self, config):
         super().__init__()
-        self.weight = nn.Parameter(torch.ones(ndim))
+        ndim = config.n_embd
+        bias = config.bias if hasattr(config, 'bias') else False
+
+        self.mup_multiplier = config.mup_multiplier if hasattr(config, 'mup_multiplier') else 1
+
+        self.weight = nn.Parameter(
+            torch.ones(ndim) / self.mup_multiplier
+        )
         self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
 
     def forward(self, input):
-        return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
+        return F.layer_norm(
+            input, 
+            self.weight.shape, 
+            self.mup_multiplier * self.weight, 
+            self.bias, 1e-5)
 
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
         super().__init__()
         assert config.n_embd % config.n_head == 0
-        self.mup_multiplier = config.mup_multiplier if config.mup else 1
+        self.impl = config.impl
+
         # key, query, value projections for all heads, but in a batch
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
         # output projection
@@ -50,11 +88,13 @@ class CausalSelfAttention(nn.Module):
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
 
+        self.fc_mult = self.impl['hidden']['output_multiplier'](config.mup_multiplier)
+
     def forward(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
+        q, k, v  = ( self.fc_mult * self.c_attn(x) ).split(self.n_embd, dim=2)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
@@ -64,11 +104,11 @@ class CausalSelfAttention(nn.Module):
             # efficient attention using Flash Attention CUDA kernels
             y = torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True,
-                scale = 1/k.size(-1)
+                scale=self.impl['attention_scale'](k.size(-1))
             )
         else:
             # manual implementation of attention
-            att = (q @ k.transpose(-2, -1)) * (1.0 / (k.size(-1)))
+            att = (q @ k.transpose(-2, -1)) * self.impl['attention_scale'](k.size(-1)) # (B, nh, T, T)
             att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
             att = F.softmax(att, dim=-1)
             att = self.attn_dropout(att)
@@ -76,7 +116,7 @@ class CausalSelfAttention(nn.Module):
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
         # output projection
-        y = self.resid_dropout(self.c_proj(y))
+        y = self.resid_dropout( self.fc_mult * self.c_proj(y) )
         return y
 
 class MLP(nn.Module):
@@ -88,20 +128,21 @@ class MLP(nn.Module):
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
+        self.fc_mult = config.impl['hidden']['output_multiplier'](config.mup_multiplier)
+
     def forward(self, x):
-        x = self.c_fc(x)
+        x = self.fc_mult * self.c_fc(x)
         x = self.gelu(x)
-        x = self.c_proj(x)
+        x = self.fc_mult * self.c_proj(x)
         x = self.dropout(x)
         return x
 
 class Block(nn.Module):
-
     def __init__(self, config):
         super().__init__()
-        self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
+        self.ln_1 = normalization(config)
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
+        self.ln_2 = normalization(config)
         self.mlp = MLP(config)
 
     def forward(self, x):
@@ -121,6 +162,8 @@ class GPTConfig:
     mup: bool = False
     mup_multiplier: int = 1
     init_std: float = 0.02
+    impl: dict = field(default_factory=standard_param_impl) # implementation details, see standard_param_impl and tpv_left_impl
+    normalization: str = "LayerNorm"
 
 class GPT(nn.Module):
 
@@ -129,28 +172,30 @@ class GPT(nn.Module):
         assert config.vocab_size is not None
         assert config.block_size is not None
         self.config = config
-
-        self.mup = config.mup
-        self.mup_multiplier = config.mup_multiplier
-        self.init_std = config.init_std
+        self.impl = config.impl if hasattr(config, 'impl') else standard_param_impl
 
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f = LayerNorm(config.n_embd, bias=config.bias),
+            ln_f = normalization(config),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+
+        self.emb_mult = self.impl['embedding']['output_multiplier'](config.mup_multiplier)
+        self.lm_mult = self.impl['unembedding']['output_multiplier'](config.mup_multiplier)
+
+        # KYLE: Untie final layer weights
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
         # not 100% sure what this is, so far seems to be harmless. TODO investigate
-        self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
+        # self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
         # init all weights
         self.apply(self._init_weights)
-        
+    
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
 
@@ -166,22 +211,36 @@ class GPT(nn.Module):
             n_params -= self.transformer.wpe.weight.numel()
         return n_params
 
+    def _get_weight_groups(self):
+        # TODO: NO BIAS
+        embedding_type = [self.transformer.wte.weight, 
+                          self.transformer.wpe.weight]
+        hidden_type = []
+        unembedding_type = [self.lm_head.weight]
+        layer_norms = []
+
+        for block in self.transformer.h:
+            hidden_type.append(block.attn.c_attn.weight)
+            hidden_type.append(block.attn.c_proj.weight)
+            hidden_type.append(block.mlp.c_fc.weight)
+            hidden_type.append(block.mlp.c_proj.weight)
+
+        for n, p in self.named_parameters():
+            if "bias" in n:
+                raise ValueError(f"Biases are not supported in {self.impl['name']} implementation, found {n}")
+
+        return embedding_type, hidden_type, unembedding_type
+        
     def _init_weights(self, module):
-        if not self.mup:
-            if isinstance(module, nn.Linear):
-                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-                if module.bias is not None:
-                    torch.nn.init.zeros_(module.bias)
-            elif isinstance(module, nn.Embedding):
-                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-        else:
-            param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
-            for pn, p in param_dict.items():
-                if p.dim() >= 2:
-                    if pn.endswith('c_attn.weight') or pn.endswith('c_fc.weight') or pn.endswith('c_proj.weight'):
-                        nn.init.normal_(p, mean=0.0, std=self.init_std / math.sqrt(self.mup_multiplier))
-                    else:
-                        nn.init.normal_(p, mean=0.0, std=self.init_std / math.sqrt(2 * self.config.n_layer))
+        et, ht, ut = self._get_weight_groups()
+        for p in et:
+            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['embedding']['init_std'](self.config.mup_multiplier))
+
+        for p in ht:
+            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['hidden']['init_std'](self.config.mup_multiplier))
+
+        for p in ut:
+            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['unembedding']['init_std'](self.config.mup_multiplier))
 
     def forward(self, idx, targets=None):
         device = idx.device
@@ -192,18 +251,18 @@ class GPT(nn.Module):
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)
+        x = self.transformer.drop( self.emb_mult * (tok_emb + pos_emb) )
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x / self.mup_multiplier)
+            logits = self.lm_mult * self.lm_head(x)
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
+            logits = self.lm_mult * self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
             loss = None
 
         return logits, loss
@@ -277,41 +336,46 @@ class GPT(nn.Module):
         return model
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
-        # start with all of the candidate parameters
-        param_dict = {pn: p for pn, p in self.named_parameters()}
-        # filter out those that do not require grad
-        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
-        # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
-        # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
-
-        mup_decay_params = []
-        decay_params = []
-        other_params = []
-        if self.config.mup:
-            for pn, p in param_dict.items():
-                if p.dim() >= 2:
-                    if pn.endswith('c_attn.weight') or pn.endswith('c_fc.weight') or pn.endswith('c_proj.weight'):
-                        mup_decay_params.append(p)
-                    else:
-                        decay_params.append(p)
-                else:
-                    other_params.append(p)
-
-        optim_groups = [
-            {'params': mup_decay_params, 'weight_decay': weight_decay, 'lr_scale': 1 / self.config.mup_multiplier},
-            {'params': decay_params, 'weight_decay': weight_decay, 'lr_scale': 1},
-            {'params': other_params, 'weight_decay': 0.0}
-        ]
-        # num_decay_params = sum(p.numel() for p in decay_params)
-        # num_nodecay_params = sum(p.numel() for p in nodecay_params)
-        # print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
-        # print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
-        # Create AdamW optimizer and use the fused version if it is available
         fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == 'cuda'
         extra_args = dict(fused=True) if use_fused else dict()
+
+        optim_groups = []
+        embedding_type, hidden_type, unembedding_type = self._get_weight_groups()
+
+        et_group = {}
+        et_group['params'] = embedding_type
+        et_group['lr_scale'] = self.impl['embedding']['lr_scale'](self.config.mup_multiplier)
+        et_group['wd_scale'] = self.impl['embedding']['wd_scale'](self.config.mup_multiplier)
+        optim_groups.append(et_group)
+
+        ht_group = {}
+        ht_group['params'] = hidden_type
+        ht_group['lr_scale'] = self.impl['hidden']['lr_scale'](self.config.mup_multiplier)
+        ht_group['wd_scale'] = self.impl['hidden']['wd_scale'](self.config.mup_multiplier)
+        optim_groups.append(ht_group)
+
+        ut_group = {}
+        ut_group['params'] = unembedding_type
+        ut_group['lr_scale'] = self.impl['unembedding']['lr_scale'](self.config.mup_multiplier)
+        ut_group['wd_scale'] = self.impl['unembedding']['wd_scale'](self.config.mup_multiplier)
+        optim_groups.append(ut_group)
+
+        layer_norms = [p for n, p in self.named_parameters() if 'ln_' in n]
+        layer_norms_group = {
+            'params': layer_norms,
+            'weight_decay': 0.0,  # no weight decay for layer norms
+            'lr_scale': self.impl['normalization']['lr_scale'](self.config.mup_multiplier),      # no scaling for layer norms
+            'wd_scale': 1.0       # no scaling for layer norms
+        }
+        optim_groups.append(layer_norms_group)
+
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
         print(f"using fused AdamW: {use_fused}")
+
+        for group in optimizer.param_groups:
+            group['weight_decay'] = group['wd_scale'] * group['weight_decay']
+            group['lr'] = group['lr_scale'] * group['lr']
 
         return optimizer
 
