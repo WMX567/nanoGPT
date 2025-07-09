@@ -17,6 +17,12 @@ from torch.nn import functional as F
 
 from mup_implementations import standard_param_impl
 
+class Capture(nn.Module):
+    def __init__(_):
+        super().__init__()
+    def forward(_, x: torch.Tensor):
+        return x
+
 def normalization(config):
     if config.normalization == "RMSNorm":
         return RMSNorm(config)
@@ -51,28 +57,47 @@ class LayerNorm(nn.Module):
 
         self.mup_multiplier = config.mup_multiplier if hasattr(config, 'mup_multiplier') else 1
 
-        self.weight = nn.Parameter(
-            torch.ones(ndim) / self.mup_multiplier
-        )
+        # self.weight = nn.Parameter(
+        #     torch.ones(ndim) / self.mup_multiplier
+        # )
+        self.weight = nn.Parameter(torch.ones(ndim))
         self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
 
     def forward(self, input):
         return F.layer_norm(
             input, 
             self.weight.shape, 
-            self.mup_multiplier * self.weight, 
+            # self.mup_multiplier * self.weight, 
+            self.weight,
             self.bias, 1e-5)
+
+
+def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
+    # Lifted from xLLM: Credit Max Ma
+    bsz, slen, n_kv_heads, head_dim = x.shape
+    if n_rep == 1:
+        return x
+    x = x[:, :, :, None, :].expand(bsz, slen, n_kv_heads, n_rep, head_dim)
+    x = x.reshape(bsz, slen, n_kv_heads * n_rep, head_dim)
+    return x
 
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
         super().__init__()
         assert config.n_embd % config.n_head == 0
+        assert config.n_head % config.n_kv_head == 0, f"Expected config.n_head {config.n_head} to be divisible by config.n_kv_head {config.n_kv_head}"
         self.impl = config.impl
+        self.n_kv_head = config.n_kv_head
 
-        # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
-        # output projection
+        self.n_kv_reps = config.n_head // self.n_kv_head
+
+        self.c_q = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        # n_embd / n_kv_reps = n_kv_head * head_size
+        self.c_kv = nn.Linear(config.n_embd, 2 * config.n_embd // self.n_kv_reps, bias=config.bias)
+
+        self.kv_capture = Capture()
+
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # regularization
         self.attn_dropout = nn.Dropout(config.dropout)
@@ -94,10 +119,16 @@ class CausalSelfAttention(nn.Module):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v  = ( self.fc_mult * self.c_attn(x) ).split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        q = self.fc_mult * self.c_q(x)
+        k, v = ( self.fc_mult * self.c_kv(x) ).split(self.n_embd // self.n_kv_reps, dim=2)
+
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+
+        k = k.view(B, T, self.n_kv_head, C // self.n_head) # (B, T, n_kvh, hs)
+        v = v.view(B, T, self.n_kv_head, C // self.n_head) # (B, T, n_kvh, hs)
+
+        k = repeat_kv(k, self.n_kv_reps).transpose(1, 2) # (B, nh, T, hs)
+        v = repeat_kv(v, self.n_kv_reps).transpose(1, 2) # (B, nh, T, hs)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
@@ -110,10 +141,18 @@ class CausalSelfAttention(nn.Module):
             # manual implementation of attention
             att = (q @ k.transpose(-2, -1)) * self.impl['attention_scale'](k.size(-1)) # (B, nh, T, T)
             att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+
+            att = att
+
             att = F.softmax(att, dim=-1)
             att = self.attn_dropout(att)
             y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+
+            y = self.kv_capture(y)
+
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+
+        y = y 
 
         # output projection
         y = self.resid_dropout( self.fc_mult * self.c_proj(y) )
@@ -145,22 +184,28 @@ class Block(nn.Module):
         self.ln_2 = normalization(config)
         self.mlp = MLP(config)
 
+        if config.mup:
+            self.depth_mult = 1.0/config.n_layer
+        else:
+            self.depth_mult = 1.
+
     def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
-        x = x + self.mlp(self.ln_2(x))
+        x = x + self.depth_mult * self.attn(self.ln_1(x))
+        x = x + self.depth_mult * self.mlp(self.ln_2(x))
         return x
 
-@dataclass
+@dataclass                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              
 class GPTConfig:
     block_size: int = 1024
     vocab_size: int = 50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
     n_layer: int = 12
     n_head: int = 12
+    n_kv_head: int = 4
     n_embd: int = 768
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     mup: bool = False
-    mup_multiplier: int = 1
+    mup_multiplier: float = 1.0
     init_std: float = 0.02
     impl: dict = field(default_factory=standard_param_impl) # implementation details, see standard_param_impl and tpv_left_impl
     normalization: str = "LayerNorm"
@@ -195,6 +240,7 @@ class GPT(nn.Module):
 
         # init all weights
         self.apply(self._init_weights)
+        # self._init_weights(None)
     
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
@@ -211,16 +257,18 @@ class GPT(nn.Module):
             n_params -= self.transformer.wpe.weight.numel()
         return n_params
 
-    def _get_weight_groups(self):
+    def _get_weight_groups(self, kv=False):
         # TODO: NO BIAS
         embedding_type = [self.transformer.wte.weight, 
                           self.transformer.wpe.weight]
         hidden_type = []
+        kv_type = []
         unembedding_type = [self.lm_head.weight]
         layer_norms = []
 
         for block in self.transformer.h:
-            hidden_type.append(block.attn.c_attn.weight)
+            hidden_type.append(block.attn.c_q.weight)
+            kv_type.append(block.attn.c_kv.weight)
             hidden_type.append(block.attn.c_proj.weight)
             hidden_type.append(block.mlp.c_fc.weight)
             hidden_type.append(block.mlp.c_proj.weight)
@@ -229,12 +277,28 @@ class GPT(nn.Module):
             if "bias" in n:
                 raise ValueError(f"Biases are not supported in {self.impl['name']} implementation, found {n}")
 
-        return embedding_type, hidden_type, unembedding_type
+        if kv:
+            return embedding_type, hidden_type, kv_type, unembedding_type
+        else:
+            return embedding_type, hidden_type + kv_type, unembedding_type
         
     def _init_weights(self, module):
-        et, ht, ut = self._get_weight_groups()
+        et, ht, kv, ut = self._get_weight_groups(kv=True)
         for p in et:
             torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['embedding']['init_std'](self.config.mup_multiplier))
+
+        for p in kv:
+            target_mult = 1.0
+
+            if self.config.n_head // self.config.n_kv_head > 1:
+                # if we have kv heads we have to fiddle with the initialization distribution
+                # r = self.config.n_head // self.config.n_kv_head
+                H = self.config.n_kv_head * self.config.n_embd // self.config.n_head
+                m = self.config.mup_multiplier
+                n = self.config.n_embd
+                target_mult = m**(1/2) * H**(1/2) / ( n**(1/2)*(n**(1/2) + H**(1/2)) )
+            
+            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['hidden']['init_std'](self.config.mup_multiplier) * target_mult)
 
         for p in ht:
             torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['hidden']['init_std'](self.config.mup_multiplier))
@@ -299,7 +363,7 @@ class GPT(nn.Module):
         config_args['block_size'] = 1024 # always 1024 for GPT model checkpoints
         config_args['bias'] = True # always True for GPT model checkpoints
         # we can override the dropout rate, if desired
-        if 'dropout' in override_args:
+        if 'dropout' in override_args:  
             print(f"overriding dropout rate to {override_args['dropout']}")
             config_args['dropout'] = override_args['dropout']
         # create a from-scratch initialized minGPT model
@@ -335,7 +399,7 @@ class GPT(nn.Module):
 
         return model
 
-    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
+    def configure_optimizers(self, weight_decay, learning_rate, betas, eps, device_type):
         fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == 'cuda'
         extra_args = dict(fused=True) if use_fused else dict()
@@ -370,11 +434,11 @@ class GPT(nn.Module):
         }
         optim_groups.append(layer_norms_group)
 
-        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
+        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, eps=eps, weight_decay=weight_decay, **extra_args)
         print(f"using fused AdamW: {use_fused}")
 
         for group in optimizer.param_groups:
-            group['weight_decay'] = group['wd_scale'] * group['weight_decay']
+            group['weight_decay'] = group['wd_scale'] * group['weight_decay'] * weight_decay
             group['lr'] = group['lr_scale'] * group['lr']
 
         return optimizer

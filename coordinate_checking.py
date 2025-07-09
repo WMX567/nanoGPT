@@ -8,6 +8,14 @@ import torch
 
 from dataclasses import dataclass
 
+def spectral_norm_svd(A: torch.Tensor) -> float:
+    # return torch.linalg.matrix_norm(A, ord=2)
+    return torch.linalg.svdvals(A.to(torch.float32)).max()
+
+def natural_spectral_norm(A: torch.Tensor) -> float:
+    # return torch.linalg.matrix_norm(A, ord='fro')
+    return spectral_norm_svd(A) * math.sqrt(A.size(1) / A.size(0))
+
 @dataclass
 class DataRow:
     layer: int
@@ -76,12 +84,13 @@ def get_hooks(data: dict, key: str) -> tuple:
         hook_data["input_mean"].append(input_mean.item())
         hook_data["input_var"].append(input_var.item())
 
-        weight_norm = module.weight.norm() * (math.sqrt(module.weight.size(1) / module.weight.size(0)))
-        weight_mean = module.weight.abs().mean()
-        weight_var = module.weight.var()
-        hook_data["weight_natural_norm"].append(weight_norm.item())
-        hook_data["weight_mean"].append(weight_mean.item())
-        hook_data["weight_var"].append(weight_var.item())
+        if hasattr(module, 'weight'):
+            weight_norm = natural_spectral_norm(module.weight)
+            weight_mean = module.weight.abs().mean()
+            weight_var = module.weight.var()
+            hook_data["weight_natural_norm"].append(weight_norm.item())
+            hook_data["weight_mean"].append(weight_mean.item())
+            hook_data["weight_var"].append(weight_var.item())
 
         if last_input is not None:
             input_diff = input - last_input
@@ -94,16 +103,17 @@ def get_hooks(data: dict, key: str) -> tuple:
     
         last_input = input.clone()
 
-        if last_weight is not None:
+        if last_weight is not None and hasattr(module, 'weight'):
             weight_diff = module.weight - last_weight
-            weight_diff_norm = weight_diff.norm() * (math.sqrt(module.weight.size(1) / module.weight.size(0)))
+            weight_diff_norm = natural_spectral_norm(weight_diff)
             weight_diff_mean = weight_diff.abs().mean()
             weight_diff_var = weight_diff.var()
             hook_data["weight_diff_natural_norm"].append(weight_diff_norm.item())
             hook_data["weight_diff_mean"].append(weight_diff_mean.item())
             hook_data["weight_diff_var"].append(weight_diff_var.item())
 
-        last_weight = module.weight.clone()
+        if hasattr(module, 'weight'):
+            last_weight = module.weight.clone()
 
     return forward_hook
 
