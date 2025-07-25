@@ -185,7 +185,7 @@ class Block(nn.Module):
         self.mlp = MLP(config)
 
         if config.mup:
-            self.depth_mult = 1.0/config.n_layer
+            self.depth_mult = 1.0 / config.n_layer
         else:
             self.depth_mult = 1.
 
@@ -243,7 +243,8 @@ class GPT(nn.Module):
         # self._init_weights(None)
     
         # report number of parameters
-        print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
+        print("Total parameters: %.2fM" % (self.get_num_params(non_embedding=False)/1e6,))
+        print("Total non-embedding parameters: %.2fM" % (self.get_num_params(non_embedding=True)/1e6,))
 
     def get_num_params(self, non_embedding=True):
         """
@@ -255,6 +256,7 @@ class GPT(nn.Module):
         n_params = sum(p.numel() for p in self.parameters())
         if non_embedding:
             n_params -= self.transformer.wpe.weight.numel()
+            n_params -= self.lm_head.weight.numel() 
         return n_params
 
     def _get_weight_groups(self, kv=False):
@@ -283,6 +285,10 @@ class GPT(nn.Module):
             return embedding_type, hidden_type + kv_type, unembedding_type
         
     def _init_weights(self, module):
+        if not self.config.mup:
+            return
+            
+        n0 = self.config.n_embd / self.config.mup_multiplier
         et, ht, kv, ut = self._get_weight_groups(kv=True)
         for p in et:
             torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['embedding']['init_std'](self.config.mup_multiplier))
@@ -292,11 +298,19 @@ class GPT(nn.Module):
 
             if self.config.n_head // self.config.n_kv_head > 1:
                 # if we have kv heads we have to fiddle with the initialization distribution
-                # r = self.config.n_head // self.config.n_kv_head
-                H = self.config.n_kv_head * self.config.n_embd // self.config.n_head
+                r = self.config.n_head // self.config.n_kv_head
+                head_size = self.config.n_embd // self.config.n_head
+                H = self.config.n_kv_head * head_size
                 m = self.config.mup_multiplier
                 n = self.config.n_embd
-                target_mult = m**(1/2) * H**(1/2) / ( n**(1/2)*(n**(1/2) + H**(1/2)) )
+                n0 = n / m
+                # target_mult = m**(1/2) * H**(1/2)**(m/n)**(1/2) / ( m**(1/2)*(m**(1/2) + H**(1/2)*(m/n)**(1/2)) )
+                # target_mult = m**(1/2) / (r**(1/2)*(n**(1/2) + H**(1/2)))*(n0**(1/2) + H**(1/2))
+                target_mult = m**(1/2) * ( 1 + (H / n0)**(1/2) ) / ( r**(1/2) * (m**(1/2) + (H / n0)**(1/2)) )
+                # target_mult = r**(-1/2)
+                # target_mult = m**(1/2) / (r**(1/2) * (n**(1/2) + H**(1/2)))
+                # target_mult = H**(1/2) / ( m**(1/2) + H**(1/2) / n0**(1/2) )
+                target_mult = m**(1/2) * 1 / ( r**(1/2) * (n**(1/2) + H**(1/2)) )
             
             torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['hidden']['init_std'](self.config.mup_multiplier) * target_mult)
 

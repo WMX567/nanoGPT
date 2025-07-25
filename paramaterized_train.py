@@ -1,0 +1,243 @@
+"""
+    Simple script to handle command line arguments for training a model.
+    We could write this in Shell but I prefer the argument parsing from Python.
+    Anyways, this should allow one to fully parameterize and execute training
+    runs from the command line, as well as utilizing SLURM. One nice thing here
+    is that we can request more GPUs for larger runs to attempt to get higher
+    MFUs.
+"""
+
+import argparse
+import datetime
+import os
+import subprocess
+
+def gpt_params(seq_len, vocab_size, d_model, num_heads, num_layers):
+    """ Given GPT config calculate total number of parameters """
+    ffw_size = 4*d_model # in GPT the number of intermediate features is always 4*d_model
+    # token and position embeddings
+    embeddings = d_model * vocab_size + d_model * seq_len
+    # transformer blocks
+    attention = 3*d_model**2 + 3*d_model # weights and biases
+    attproj = d_model**2 + d_model
+    ffw = d_model*(ffw_size) + ffw_size
+    ffwproj = ffw_size*d_model + d_model
+    layernorms = 2*2*d_model
+    # dense
+    ln_f = 2*d_model
+    dense = d_model*vocab_size # note: no bias here
+    total_params = num_layers*(attention + attproj + ffw + ffwproj + layernorms) + ln_f + dense
+    # return total_params
+    return total_params
+
+now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+file_dir = os.path.dirname(os.path.abspath(__file__))
+TRAINING_SCRIPT = os.path.join(file_dir, 'slimpj_train_2.py')
+
+parser = argparse.ArgumentParser()
+# Sbatch arguments
+parser.add_argument('--sbatch_timeout', type=str, default='50:00:00')
+parser.add_argument('--sbatch_nodes', type=int, default=1)
+parser.add_argument('--sbatch_exclusive', action='store_true')
+parser.add_argument('--n_gpus', type=int, default=8) # This will be nproc_per_node for torchrun
+parser.add_argument('--cpus-per-task', type=int, default=16) # This will be cpus-per-task for srun
+parser.add_argument('--sbatch_logging_dir', type=str, default='slurm_logs')
+
+# Model testbed arguments
+parser.add_argument('--out_dir', type=str, default=f'model_training/{now}')
+parser.add_argument('--log_wandb', action='store_true')
+parser.add_argument('--wandb_project', type=str, default=None)
+parser.add_argument('--backend', type=str, default='nccl')
+parser.add_argument('--device', type=str, default='cuda')
+parser.add_argument('--dtype', type=str, default='float16')
+parser.add_argument('--compile', action='store_true')
+parser.add_argument('--coord_check', action='store_true')
+
+# Evaluation parameters
+parser.add_argument('--eval_interval', type=int, default=10000000000)
+parser.add_argument('--log_interval', type=int, default=1)
+parser.add_argument('--eval_iters', type=int, default=300)
+parser.add_argument('--eval_only', action='store_true')
+
+# Initialization and dataset
+parser.add_argument('--init_from', type=str, default='scratch')
+parser.add_argument('--dataset', type=str, default='slim_pajama')
+parser.add_argument('--block_size', type=int, default=1024)
+
+# Model dynamics arguments. By default max_iters is determined by the prespecified TPP
+parser.add_argument('--batch_size', type=int, default=64)
+parser.add_argument('--gradient_accumulation_steps', type=int, default=1)
+parser.add_argument('--max_iters', type=int, default=None)
+parser.add_argument('--lr_decay_iters', type=int, default=None)
+parser.add_argument('--tpp', type=int, default=5)
+parser.add_argument('--warmup_iters', type=int, default=None)
+
+# Model training parameters
+parser.add_argument('--n_layer', type=int, default=12)
+parser.add_argument('--n_head', type=int, default=16)
+parser.add_argument('--n_kv_head', type=int, default=16)
+parser.add_argument('--n_embd', type=int, default=1024)
+parser.add_argument('--dropout', type=float, default=0.0)
+parser.add_argument('--bias', action='store_true')
+parser.add_argument('--init_std', type=float, default=0.02)
+parser.add_argument('--learning_rate', type=float, default=0.000646)
+parser.add_argument('--weight_decay', type=float, default=0.0)
+parser.add_argument('--seed', type=int, default=42)
+
+parser.add_argument('--mup', action='store_true', help='Enable muP', default=False)
+parser.add_argument('--mup_multiplier', type=float, default=1)
+
+parser.add_argument('--normalization', type=str, default='RMSNorm')
+parser.add_argument('--impl', type=str, default='tpv_left_impl')
+
+# Optimizer parameters
+parser.add_argument('--beta1', type=float, default=0.9)
+parser.add_argument('--beta2', type=float, default=0.95)
+parser.add_argument('--grad_clip', type=float, default=1.0)
+parser.add_argument('--decay_lr', action='store_true')
+
+args = parser.parse_args()
+
+os.makedirs(args.sbatch_logging_dir, exist_ok=True)
+os.makedirs(os.path.join(args.sbatch_logging_dir, now), exist_ok=True)
+os.makedirs(args.out_dir, exist_ok=True)
+
+if args.max_iters is None:
+    n_params = gpt_params(
+        seq_len=args.block_size,
+        vocab_size=50257,
+        d_model=args.n_embd,
+        num_heads=args.n_head,
+        num_layers=args.n_layer
+    )
+    # The batch size is assumed to be multiplied by gradient accumulation steps
+    # but ideally the grad accumulation steps match the gpu numbers...
+    args.max_iters = args.tpp * int(n_params / (args.batch_size * 979))
+
+if args.lr_decay_iters is None:
+    args.lr_decay_iters = args.max_iters
+
+if args.warmup_iters is None:
+    args.warmup_iters = min(int(0.1 * args.max_iters), 1000)
+
+
+# exclusive flag grants exclusive access to the entire node. However
+# requested GPUs are given exclusive access by default.
+exclusive = '#SBATCH --exclusive' if args.sbatch_exclusive else ''
+
+if args.n_gpus > 8:
+    raise ValueError("n_gpus is a per-node value and cannot exceed 8.")
+
+# Determine the command to run based on n_gpus
+if args.n_gpus > 1:
+    # For multi-GPU, use torchrun
+    # SLURM_JOB_NODELIST and SLURM_JOBID are available in the SLURM job environment
+    # We need to determine MASTER_ADDR and MASTER_PORT within the SLURM script
+    # SLURM_NNODES and SLURM_NODEID are also provided by SLURM
+    dist_args = f"""
+# --- PyTorch DDP Specific Environment Variables ---
+export MASTER_ADDR=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)
+export MASTER_PORT=$(expr 10000 + $(echo -n $SLURM_JOBID | tail -c 4))
+
+echo "Master Address: $MASTER_ADDR"
+echo "Master Port: $MASTER_PORT"
+echo "SLURM_NNODES: $SLURM_NNODES"
+echo "SLURM_NODEID: $SLURM_NODEID"
+
+NNODES=$SLURM_JOB_NUM_NODES
+
+nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) )
+nodes_array=($nodes)
+head_node=${{nodes_array[0]}}
+head_node_ip=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
+export TRITON_CACHE_DIR="/tmp/triton-cache"
+
+echo Node IP: $head_node_ip
+echo $SLURM_JOB_NODELIST
+export LOGLEVEL=INFO
+
+DISTRIBUTED_ARGS=(
+    --nproc_per_node={args.n_gpus} 
+    --nnodes=$NNODES
+    --rdzv_id $RANDOM-$USER 
+    --rdzv_backend c10d 
+    --rdzv_endpoint $MASTER_ADDR:$MASTER_PORT
+)
+"""
+else:
+    # For single GPU, just run python directly
+    dist_args = f""
+
+# Construct the full SLURM batch script
+shell_script = f"""#!/bin/bash
+#SBATCH --time={args.sbatch_timeout}
+#SBATCH --nodes={args.sbatch_nodes}
+{exclusive}
+#SBATCH --gres=gpu:{args.n_gpus}
+#SBATCH --ntasks-per-node=1 # Important: srun launches one task (torchrun) per node, or one python script if n_gpus=1
+#SBATCH --cpus-per-task={args.cpus_per_task}
+
+#SBATCH --output={args.sbatch_logging_dir}/{now}/%j.out
+#SBATCH --error={args.sbatch_logging_dir}/{now}/%j.err
+#SBATCH --mem=16G
+#SBATCH --partition=lowprio
+#SBATCH --qos=lowprio
+#SBATCH --distribution=block:block
+
+{dist_args}
+
+TRAINING_ARGS=(
+    --out_dir="{args.out_dir}"
+    --wandb_log={args.log_wandb}
+    --wandb_project='{args.wandb_project}'
+    --eval_interval={args.eval_interval}
+    --log_interval={args.log_interval}
+    --eval_iters={args.eval_iters}
+    --eval_only={args.eval_only}
+    --init_from='{args.init_from}'
+    --dataset='{args.dataset}'
+    --gradient_accumulation_steps={args.gradient_accumulation_steps}
+    --batch_size={args.batch_size}
+    --block_size={args.block_size}
+    --n_layer={args.n_layer}
+    --n_head={args.n_head}
+    --n_kv_head={args.n_kv_head}
+    --n_embd={args.n_embd}
+    --dropout={args.dropout}
+    --bias={args.bias}
+    --init_std={args.init_std}
+    --learning_rate={args.learning_rate}
+    --max_iters={args.max_iters}
+    --lr_decay_iters={args.lr_decay_iters}
+    --warmup_iters={args.warmup_iters}
+    --weight_decay={args.weight_decay}
+    --beta1={args.beta1}
+    --beta2={args.beta2}
+    --grad_clip={args.grad_clip}
+    --decay_lr={args.decay_lr}
+    --mup={args.mup}
+    --mup_multiplier={args.mup_multiplier}
+    --seed={args.seed}
+    --backend='{args.backend}'
+    --device='{args.device}'
+    --dtype='{args.dtype}'
+    --compile={args.compile}
+    --coord_check={args.coord_check}
+    --normalization='{args.normalization}'
+    --impl='{args.impl}'
+)
+
+srun --export=ALL,MASTER_ADDR,MASTER_PORT,WORKDIR,requirements \\
+    --container-mounts="/mnt:/mnt" \\
+    torchrun "${{DISTRIBUTED_ARGS[@]}}" {TRAINING_SCRIPT} "${{TRAINING_ARGS[@]}}"
+"""
+
+try:    
+    with open(os.path.join(args.sbatch_logging_dir, now, f"sbatch_command.sh"), 'w') as f:
+        f.write(shell_script)
+    process = subprocess.run(['sbatch'], input=shell_script, text=True, capture_output=True, check=True)
+    print(f"Job submitted successfully: {process.stdout.strip()}", flush=True)
+except subprocess.CalledProcessError as e:
+    print(f"Error submitting job: {e.stderr}", flush=True)
+    raise RuntimeError("Failed to submit the sbatch job. Please check the error message above.")
