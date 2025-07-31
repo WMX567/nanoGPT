@@ -69,9 +69,14 @@ parser.add_argument('--block_size', type=int, default=1024)
 parser.add_argument('--batch_size', type=int, default=64)
 parser.add_argument('--gradient_accumulation_steps', type=int, default=1)
 parser.add_argument('--max_iters', type=int, default=None)
+parser.add_argument('--decay_profile', type=str, default='cosine')  # ['cosine', 'wsd', 'wsd_cosine_tail']
 parser.add_argument('--lr_decay_iters', type=int, default=None)
+parser.add_argument('--cooldown_iters', type=int, default=1000)  # For WSD decay profile
 parser.add_argument('--tpp', type=int, default=5)
 parser.add_argument('--warmup_iters', type=int, default=None)
+parser.add_argument('--anneal_wd', action='store_true', help='Enable weight decay annealing')
+parser.add_argument('--wd_warmup_iters', type=int, default=1000, help='Weight decay warmup iterations')
+parser.add_argument('--wd_anneal_iters', type=int, default=1000, help='Weight decay anneal iterations')
 
 # Model training parameters
 parser.add_argument('--n_layer', type=int, default=12)
@@ -82,13 +87,17 @@ parser.add_argument('--dropout', type=float, default=0.0)
 parser.add_argument('--bias', action='store_true')
 parser.add_argument('--init_std', type=float, default=0.02)
 parser.add_argument('--learning_rate', type=float, default=0.000646)
+parser.add_argument('--min_lr', type=float, default=0.0000646)
 parser.add_argument('--weight_decay', type=float, default=0.0)
 parser.add_argument('--seed', type=int, default=42)
 
 parser.add_argument('--mup', action='store_true', help='Enable muP', default=False)
 parser.add_argument('--mup_multiplier', type=float, default=1)
+parser.add_argument('--complete_p_layers', action='store_true', help='Enable complete P layers', default=False)
 
 parser.add_argument('--normalization', type=str, default='RMSNorm')
+parser.add_argument('--q_prelayer_normalization', type=str, default='NoNorm', help='Pre-layer normalization for query')
+parser.add_argument('--k_prelayer_normalization', type=str, default='NoNorm', help='Pre-layer normalization for key')
 parser.add_argument('--impl', type=str, default='tpv_left_impl')
 
 # Optimizer parameters
@@ -100,7 +109,6 @@ parser.add_argument('--decay_lr', action='store_true')
 args = parser.parse_args()
 
 os.makedirs(args.sbatch_logging_dir, exist_ok=True)
-os.makedirs(os.path.join(args.sbatch_logging_dir, now), exist_ok=True)
 os.makedirs(args.out_dir, exist_ok=True)
 
 if args.max_iters is None:
@@ -178,8 +186,8 @@ shell_script = f"""#!/bin/bash
 #SBATCH --ntasks-per-node=1 # Important: srun launches one task (torchrun) per node, or one python script if n_gpus=1
 #SBATCH --cpus-per-task={args.cpus_per_task}
 
-#SBATCH --output={args.sbatch_logging_dir}/{now}/%j.out
-#SBATCH --error={args.sbatch_logging_dir}/{now}/%j.err
+#SBATCH --output={args.sbatch_logging_dir}/%j.out
+#SBATCH --error={args.sbatch_logging_dir}/%j.err
 #SBATCH --mem=16G
 #SBATCH --partition=lowprio
 #SBATCH --qos=lowprio
@@ -208,7 +216,9 @@ TRAINING_ARGS=(
     --bias={args.bias}
     --init_std={args.init_std}
     --learning_rate={args.learning_rate}
+    --min_lr={args.min_lr}
     --max_iters={args.max_iters}
+    --anneal_wd={args.anneal_wd}
     --lr_decay_iters={args.lr_decay_iters}
     --warmup_iters={args.warmup_iters}
     --weight_decay={args.weight_decay}
@@ -216,6 +226,7 @@ TRAINING_ARGS=(
     --beta2={args.beta2}
     --grad_clip={args.grad_clip}
     --decay_lr={args.decay_lr}
+    --complete_p_layers={args.complete_p_layers}
     --mup={args.mup}
     --mup_multiplier={args.mup_multiplier}
     --seed={args.seed}
@@ -225,7 +236,15 @@ TRAINING_ARGS=(
     --compile={args.compile}
     --coord_check={args.coord_check}
     --normalization='{args.normalization}'
+    --q_prelayer_normalization='{args.q_prelayer_normalization}'
+    --k_prelayer_normalization='{args.k_prelayer_normalization}'
     --impl='{args.impl}'
+    --decay_profile='{args.decay_profile}'
+    --cooldown_iters={args.cooldown_iters}
+    --slurm_job_id="$SLURM_JOB_ID"
+    --slurm_array_task_id="$SLURM_ARRAY_TASK_ID"
+    --wd_warmup_iters={args.wd_warmup_iters}
+    --wd_anneal_iters={args.wd_anneal_iters}
 )
 
 srun --export=ALL,MASTER_ADDR,MASTER_PORT,WORKDIR,requirements \\
@@ -234,7 +253,7 @@ srun --export=ALL,MASTER_ADDR,MASTER_PORT,WORKDIR,requirements \\
 """
 
 try:    
-    with open(os.path.join(args.sbatch_logging_dir, now, f"sbatch_command.sh"), 'w') as f:
+    with open(os.path.join(args.sbatch_logging_dir, f"sbatch_command.sh"), 'w') as f:
         f.write(shell_script)
     process = subprocess.run(['sbatch'], input=shell_script, text=True, capture_output=True, check=True)
     print(f"Job submitted successfully: {process.stdout.strip()}", flush=True)

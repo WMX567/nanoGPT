@@ -31,6 +31,14 @@ def normalization(config):
     else:
         raise ValueError(f"Unknown normalization type: {config.normalization}. Supported: 'RMSNorm', 'LayerNorm'")
 
+class L2Norm(nn.Module):
+    def __init__(self, config, eps=1e-12):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, x):
+        return x / (x.norm(dim=-1, keepdim=True) + self.eps)
+
 class RMSNorm(nn.Module):
     def __init__(self, config, eps=1e-3):
         super().__init__()
@@ -50,10 +58,12 @@ class RMSNorm(nn.Module):
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
 
-    def __init__(self, config):
+    def __init__(self, config, bias=None, shape=None):
         super().__init__()
+        print(f"Initialized a Layer Norm", flush=True)
         ndim = config.n_embd
-        bias = config.bias if hasattr(config, 'bias') else False
+        if bias is None:
+            bias = config.bias if hasattr(config, 'bias') else False
 
         self.mup_multiplier = config.mup_multiplier if hasattr(config, 'mup_multiplier') else 1
 
@@ -98,6 +108,28 @@ class CausalSelfAttention(nn.Module):
 
         self.kv_capture = Capture()
 
+        self.q_prelayer_norm = None
+        print(f"Config: q prelayer_norm: {config.q_prelayer_normalization}, k prelayer_norm: {config.k_prelayer_normalization}")
+        if config.q_prelayer_normalization == 'LayerNorm':
+            self.q_prelayer_norm = LayerNorm(config)
+        elif config.q_prelayer_normalization == 'L2Norm':
+            self.q_prelayer_norm = L2Norm(config)
+        elif config.k_prelayer_normalization == 'L2NormScale':
+            self.q_prelayer_norm = RMSNorm(config)
+        elif config.q_prelayer_normalization == 'LayerNormWithBias':
+            self.q_prelayer_norm = LayerNorm(config, bias=True)
+
+        self.k_prelayer_norm = None
+        if config.k_prelayer_normalization == 'LayerNorm':
+            self.k_prelayer_norm = LayerNorm(config)
+        elif config.k_prelayer_normalization == 'L2Norm':
+            self.k_prelayer_norm = L2Norm(config)
+        elif config.k_prelayer_normalization == 'L2NormScale':
+            self.k_prelayer_norm = RMSNorm(config)
+        elif config.k_prelayer_normalization == 'LayerNormWithBias':
+            self.k_prelayer_norm = LayerNorm(config, bias=True)
+            
+
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # regularization
         self.attn_dropout = nn.Dropout(config.dropout)
@@ -121,6 +153,11 @@ class CausalSelfAttention(nn.Module):
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         q = self.fc_mult * self.c_q(x)
         k, v = ( self.fc_mult * self.c_kv(x) ).split(self.n_embd // self.n_kv_reps, dim=2)
+
+        if self.q_prelayer_norm is not None:
+            q = self.q_prelayer_norm(q)
+        if self.k_prelayer_norm is not None:
+            k = self.k_prelayer_norm(k)
 
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
@@ -184,7 +221,7 @@ class Block(nn.Module):
         self.ln_2 = normalization(config)
         self.mlp = MLP(config)
 
-        if config.mup:
+        if config.mup or config.complete_p_layers:
             self.depth_mult = 1.0 / config.n_layer
         else:
             self.depth_mult = 1.
@@ -209,6 +246,9 @@ class GPTConfig:
     init_std: float = 0.02
     impl: dict = field(default_factory=standard_param_impl) # implementation details, see standard_param_impl and tpv_left_impl
     normalization: str = "LayerNorm"
+    q_prelayer_normalization: str = 'None'
+    k_prelayer_normalization: str = 'None'
+    complete_p_layers: bool = False # if True, the depth multiplier is 1/n_layer, otherwise 1.0
 
 class GPT(nn.Module):
 
@@ -276,7 +316,7 @@ class GPT(nn.Module):
             hidden_type.append(block.mlp.c_proj.weight)
 
         for n, p in self.named_parameters():
-            if "bias" in n:
+            if "bias" in n and self.config.mup:
                 raise ValueError(f"Biases are not supported in {self.impl['name']} implementation, found {n}")
 
         if kv:

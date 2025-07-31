@@ -79,6 +79,8 @@ grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
 decay_lr = True # whether to decay the learning rate
 warmup_iters = 2000 # how many steps to warm up for
+cooldown_iters = 2000
+decay_profile = 'cosine' # ['cosine', 'wsd', 'wsd_cosine_tail']
 lr_decay_iters = 600000 # should be ~= max_iters per Chinchilla
 min_lr = 6e-5 # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # DDP settings
@@ -98,6 +100,15 @@ init_std = 0.02
 coord_check = False
 avg_interval = 30
 normalization = "LayerNorm"
+# prelayer norm options ['None', 'LayerNorm', 'L2Norm']
+q_prelayer_normalization = 'None'
+k_prelayer_normalization = 'None'
+complete_p_layers = False
+slurm_job_id = 0
+slurm_array_task_id = 0
+anneal_wd = False
+wd_warmup_iters = 1000
+wd_anneal_iters = 1000
 # -----------------------------------------------------------------------------
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open('configurator.py').read()) # overrides from command line or config file
@@ -246,7 +257,8 @@ else:
 model_args = dict(n_layer=n_layer, n_head=n_head, n_kv_head=n_kv_head, n_embd=n_embd, block_size=block_size,
                   bias=bias, vocab_size=None, dropout=dropout, mup=mup, 
                   mup_multiplier=mup_multiplier, init_std=init_std,
-                  impl=ptimpl, normalization=normalization)
+                  impl=ptimpl, normalization=normalization, complete_p_layers=complete_p_layers,
+                  q_prelayer_normalization=q_prelayer_normalization, k_prelayer_normalization=k_prelayer_normalization,)
 
 if init_from == 'scratch':
     # init a new model from scratch
@@ -369,11 +381,25 @@ def estimate_loss():
     model.train()
     return out
 
-# learning rate decay scheduler (cosine with warmup)
-def get_lr(it):
-    if coord_check:
+def get_lr_wsd(it):
+    # Warm up, warm down, tail type (cosine, linear), min_lr
+    if it < warmup_iters:
+        return learning_rate * (it + 1) / (warmup_iters + 1)
+    elif warmup_iters <= it and it < lr_decay_iters - cooldown_iters:
         return learning_rate
-    
+    elif it >= lr_decay_iters - cooldown_iters and it < lr_decay_iters:
+        decay_ratio = (it - (lr_decay_iters - cooldown_iters)) / cooldown_iters
+        if decay_profile == 'wsd_cosine_tail':
+            assert 0 <= decay_ratio <= 1
+            coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+            return min_lr + coeff * (learning_rate - min_lr)
+        else:
+            assert 0 <= decay_ratio <= 1
+            return learning_rate - decay_ratio * (learning_rate - min_lr) 
+    else:
+        return min_lr
+
+def get_lr_cosine(it):
     # 1) linear warmup for warmup_iters steps
     if it < warmup_iters:
         return learning_rate * (it + 1) / (warmup_iters + 1)
@@ -386,6 +412,41 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff ranges 0..1
     return min_lr + coeff * (learning_rate - min_lr)
 
+def get_lr_const(it):
+    return learning_rate
+
+def get_wd_annealed(it):
+    if it < wd_warmup_iters:
+        return weight_decay
+    elif it < wd_warmup_iters + wd_anneal_iters:
+        decay_ratio = (it - wd_warmup_iters) / wd_anneal_iters
+        assert 0 <= decay_ratio <= 1
+        return weight_decay * (1.0 - decay_ratio)
+    else:
+        return 0.0
+
+def get_wd_const(it):
+    return weight_decay
+
+
+if coord_check:
+    get_lr = get_lr_const
+    get_wd = get_wd_const
+
+if anneal_wd:
+    get_wd = get_wd_annealed
+else:
+    get_wd = get_wd_const
+
+if decay_profile == 'wsd' or decay_profile == 'wsd_cosine_tail':
+    assert cooldown_iters is not None, "cooldown_iters must be set for WSD decay profile"
+    get_lr = get_lr_wsd
+elif decay_profile == 'cosine':
+    get_lr = get_lr_cosine
+else:
+    raise ValueError(f"Unknown decay profile: {decay_profile}. Supported: ['wsd', 'cosine']")
+    
+
 config['model_params'] = model_params
 config['non_embedding_params'] = non_embedding_params
 # logging
@@ -393,6 +454,8 @@ if wandb_log and master_process:
     import wandb
     wandb.init(project=wandb_project, name=wandb_run_name, config=config)
 
+tiwd = 0 # total integrated weight decay
+tilr = 0 # total integrated learning rate
 # training loop
 X, Y = get_batch('train') # fetch the very first batch
 t0 = time.time()
@@ -403,8 +466,12 @@ while True:
 
     # determine and set the learning rate for this iteration
     lr = get_lr(iter_num) if decay_lr else learning_rate
+    wd = get_wd(iter_num) if anneal_wd else weight_decay
+    tiwd += lr * wd
+    tilr += lr
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr * param_group.get('lr_scale', 1.0)
+        param_group['weight_decay'] = wd * param_group.get('wd_scale', 1.0)
 
     # evaluate the loss on train/val sets and write checkpoints
     if iter_num % eval_interval == 0 and master_process:
@@ -416,6 +483,10 @@ while True:
                 "train/loss": losses['train'],
                 "val/loss": losses['val'],
                 "lr": lr,
+                "wd": wd,
+                "tiwd": tiwd,
+                "tilr": tilr,
+                "base_lr": learning_rate,
                 "mfu": running_mfu*100, # convert to percentage
             })
         if losses['val'] < best_val_loss or always_save_checkpoint:
@@ -430,7 +501,7 @@ while True:
                     'config': config,
                 }
                 print(f"saving checkpoint to {out_dir}")
-                torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+                # torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
     if iter_num == 0 and eval_only:
         break
 
@@ -488,6 +559,9 @@ while True:
                 "train/loss": lossf,
                 "mfu": running_mfu * 100, # convert to percentage
                 "lr": lr,
+                "tiwd": tiwd,
+                "tilr": tilr,
+                "wd": wd,
                 "train/avg_loss": sum(avg_loss) / len(avg_loss),
                 **layer_norm_data,
                 # "abs_grad_norm": abs_grad_norm,

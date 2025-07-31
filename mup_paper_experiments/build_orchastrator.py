@@ -1,4 +1,6 @@
 import argparse
+import datetime
+import os
 import subprocess
 
 COMMAND_FILE = "/mnt/weka/home/kyle.chickering/code/nanoGPT/paramaterized_train.py"
@@ -9,6 +11,15 @@ parser.add_argument('--config_generator_file', type=str, required=True)
 parser.add_argument('--max_concurrent', type=int, default=30)
 
 args = parser.parse_args()
+
+now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+base_logging_dir = "/mnt/weka/home/kyle.chickering/code/nanoGPT/mup_paper_experiments/slurm_logs"
+logging_dir = f"{base_logging_dir}/{now}"
+orchastrator_dir = f"{logging_dir}/orchastrator"
+
+os.makedirs(base_logging_dir, exist_ok=True)
+os.makedirs(logging_dir, exist_ok=True)
+os.makedirs(orchastrator_dir, exist_ok=True)
 
 # run the config to get configs as a string
 def run_config_generator(config_generator_file):
@@ -38,8 +49,8 @@ sbatch_headers = f"""#!/bin/bash
 #SBATCH --job-name=kyle_orchestrator
 #SBATCH --time=50:00:00
 #SBATCH --cpus-per-task=16
-#SBATCH --output=slurm_logs/%A_%a.out
-#SBATCH --error=slurm_logs/%A_%a.err
+#SBATCH --output={orchastrator_dir}/%A_%a.out
+#SBATCH --error={orchastrator_dir}/%A_%a.err
 #SBATCH --mem=8G
 #SBATCH --partition=lowprio
 #SBATCH --qos=lowprio
@@ -91,10 +102,12 @@ do
     fi
 done < <(echo "$CONFIG_JSON" | jq -r 'to_entries[] | .key + "=" + (.value | @json)')
 
+ARGS+=" --sbatch_logging_dir {logging_dir}"
+
 """
 
-command_str = f"""python {COMMAND_FILE} $ARGS"""
-# command_str = """echo $ARGS"""
+command_str = """echo $ARGS\n"""
+command_str += f"""python {COMMAND_FILE} $ARGS"""
 
 shell_script = sbatch_headers + config_str + parsing_str + command_str
 

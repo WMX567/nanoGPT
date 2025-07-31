@@ -1,5 +1,4 @@
 #!/bin/bash
-#SBATCH --account=research
 #SBATCH --time=0:30:00
 #SBATCH --nodes=1
 #SBATCH --exclusive
@@ -13,12 +12,14 @@ mkdir -p ${out_dir}
 
 head_size=64
 
-embeds=(256 512 768 1024 1536 2048)
+embeds=(256 384 512 640 768 896 1024 2048)
 for seed in {0..5}; do
     for emb in "${embeds[@]}"; do
-        mup_multiplier=$(( emb / 256 ))
+        mup_multiplier=$(echo "scale=2; $emb / 256" | bc)
         n_heads=$(( emb / head_size ))
-        n_kv_heads=$(( n_heads / 2 ))
+        # n_kv_heads=$(( n_heads / 2 ))
+        # n_kv_heads is random number between 2 and n_heads
+        n_kv_heads=$(( RANDOM % (n_heads - 1) + 2 ))
 
         echo "mup_muliplier: ${mup_multiplier}, n_heads: ${n_heads}, emb: ${emb}, seed: ${seed}"
         srun python coord_check.py \
@@ -35,7 +36,7 @@ for seed in {0..5}; do
             --block_size=1024 \
             --n_layer=3 \
             --n_head=${n_heads} \
-            --n_kv_head=${n_heads} \
+            --n_kv_head=2 \
             --n_embd=${emb} \
             --dropout=0.0 \
             --bias=False \
@@ -54,6 +55,6 @@ for seed in {0..5}; do
             --device='cuda' \
             --dtype='float32' \
             --compile=False \
-            --impl='xllm_impl'
+            --impl='tpv_left_impl'
     done
 done

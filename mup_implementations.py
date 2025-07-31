@@ -1,3 +1,9 @@
+"""
+    This file contains "implementations" of muP. There are different ways to implement
+    the same paramaterization, and this file contains some examples. For example, we 
+    may not want to initialize the parameters to be too small.
+"""
+
 # TODO: This is not the correct standard param implementation.
 standard_param_impl = {
     'name':                     'SP',
@@ -14,7 +20,7 @@ standard_param_impl = {
         'output_multiplier':    lambda m: 1.0
     },
     'unembedding': {
-        'init_std':             lambda m: 1.0,
+        'init_std':             lambda m: 1.0 / m**(1/2),
         'lr_scale':             lambda m: 1.0,
         'wd_scale':             lambda m: 1.0,
         'output_multiplier':    lambda m: 1.0
@@ -106,4 +112,38 @@ xllm_impl = {
         'lr_scale':             lambda m: 1.0 / m,
     },
     'attention_scale':          lambda d: 1 / d
+}
+
+muS_impl = {
+    'name':                     'muS',
+    'embedding': {
+        'init_std':             lambda m: 1.0,
+        'lr_scale':             lambda m: 1.0,
+        'wd_scale':             lambda m: 1.0,
+        'output_multiplier':    lambda m: 1.0,
+    },
+    'hidden': {
+        'init_std':             lambda m: 1.0,
+        'lr_scale':             lambda m: 1.0 / m**(1/2),
+        'wd_scale':             lambda m: 1.0,
+        'output_multiplier':    lambda m: 1.0 / m**(1/2)
+    },
+    'unembedding': {
+        'init_std':             lambda m: 1.0,
+        'lr_scale':             lambda m: 1.0,
+        'wd_scale':             lambda m: 1.0,
+        'output_multiplier':    lambda m: 1.0 / m, 
+    },
+    'normalization': {
+        'lr_scale':             lambda m: 1.0,
+    },
+    'attention_scale':          lambda d: 1 / d
+}
+
+impl_dict = {
+    'standard_param_impl': standard_param_impl,
+    'tpv_left_impl': tpv_left_impl,
+    'tpv_right_impl': tpv_right_impl,
+    'xllm_impl': xllm_impl,
+    'muS_impl': muS_impl,
 }
