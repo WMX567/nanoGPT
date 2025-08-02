@@ -26,6 +26,7 @@ class DataRow:
     value: float
     iteration: int
     seed: int
+    depth: int 
 
     def as_dict(self):
         return {
@@ -36,7 +37,8 @@ class DataRow:
             "data_type": self.data_type,
             "value": self.value,
             "iteration": self.iteration,
-            "seed": self.seed
+            "seed": self.seed,
+            "depth": self.depth
         }
 
 def get_hooks(data: dict, key: str) -> tuple:
@@ -117,7 +119,7 @@ def get_hooks(data: dict, key: str) -> tuple:
 
     return forward_hook
 
-def new_rows_from_layer_type(layer_data, layer_type: str, width: int, seed: int, layer: str, fDf: str) -> DataRow:
+def new_rows_from_layer_type(layer_data, layer_type: str, width: int, seed: int, layer: str, fDf: str, depth: int) -> DataRow:
     new_rows = []
     for data_type in ["natural_norm", "mean", "var"]:
         for idx in range(len(layer_data[f"{layer_type}_{data_type}"])):
@@ -127,6 +129,7 @@ def new_rows_from_layer_type(layer_data, layer_type: str, width: int, seed: int,
                     layer=layer,
                     width=width,
                     seed=seed,
+                    depth=depth,
                     layer_type=layer_type_name,
                     data_type="norm" if data_type == "natural_norm" else data_type,
                     fDf=fDf,
@@ -136,14 +139,14 @@ def new_rows_from_layer_type(layer_data, layer_type: str, width: int, seed: int,
             )
     return new_rows
 
-def dataframe_from_data(data: list, width: int, seed: int) -> pd.DataFrame:
+def dataframe_from_data(data: list, width: int, seed: int, depth: int) -> pd.DataFrame:
     rows = []
 
     # data is a list of dictionaries, one for each of the layers
     for key, layer_data in data.items():
-        rows.extend(new_rows_from_layer_type(layer_data, 'input', width, seed, key, 'f'))
-        rows.extend(new_rows_from_layer_type(layer_data, 'weight', width, seed, key, 'f'))
-        rows.extend(new_rows_from_layer_type(layer_data, 'input_diff', width, seed, key, 'Df'))
-        rows.extend(new_rows_from_layer_type(layer_data, 'weight_diff', width, seed, key, 'Df'))
+        rows.extend(new_rows_from_layer_type(layer_data, 'input', width, seed, key, 'f', depth))
+        rows.extend(new_rows_from_layer_type(layer_data, 'weight', width, seed, key, 'f', depth))
+        rows.extend(new_rows_from_layer_type(layer_data, 'input_diff', width, seed, key, 'Df', depth))
+        rows.extend(new_rows_from_layer_type(layer_data, 'weight_diff', width, seed, key, 'Df', depth))
 
     return pd.DataFrame(rows)

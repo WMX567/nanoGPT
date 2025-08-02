@@ -263,7 +263,7 @@ class GPT(nn.Module):
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
-            h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+            h = nn.ModuleList(reversed([Block(config) for _ in range(config.n_layer)])),
             ln_f = normalization(config),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
@@ -308,7 +308,7 @@ class GPT(nn.Module):
         unembedding_type = [self.lm_head.weight]
         layer_norms = []
 
-        for block in self.transformer.h:
+        for block in reversed(self.transformer.h):
             hidden_type.append(block.attn.c_q.weight)
             kv_type.append(block.attn.c_kv.weight)
             hidden_type.append(block.attn.c_proj.weight)
@@ -453,9 +453,9 @@ class GPT(nn.Module):
 
         return model
 
-    def configure_optimizers(self, weight_decay, learning_rate, betas, eps, device_type):
-        fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
-        use_fused = fused_available and device_type == 'cuda'
+    def configure_optimizers(self, weight_decay, learning_rate, betas, eps, device_type, adaptive_optimizer=False):
+        # fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+        use_fused = False # fused_available and device_type == 'cuda'
         extra_args = dict(fused=True) if use_fused else dict()
 
         optim_groups = []
@@ -488,8 +488,14 @@ class GPT(nn.Module):
         }
         optim_groups.append(layer_norms_group)
 
-        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, eps=eps, weight_decay=weight_decay, **extra_args)
-        print(f"using fused AdamW: {use_fused}")
+        if adaptive_optimizer:
+            # use the OWDA optimizer, which is an AdamW variant with dynamic weight decay
+            from oawda import OWDAAdam
+            print("Using OAWDA optimizer")
+            optimizer = OWDAAdam(optim_groups, lr=learning_rate, betas=betas, eps=eps, weight_decay=weight_decay, **extra_args)
+        else:
+            optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, eps=eps, weight_decay=weight_decay, **extra_args)
+            print(f"using fused AdamW: {use_fused}")
 
         for group in optimizer.param_groups:
             group['weight_decay'] = group['wd_scale'] * group['weight_decay'] * weight_decay
