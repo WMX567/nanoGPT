@@ -43,6 +43,7 @@ parser.add_argument('--sbatch_exclusive', action='store_true')
 parser.add_argument('--n_gpus', type=int, default=8) # This will be nproc_per_node for torchrun
 parser.add_argument('--cpus-per-task', type=int, default=16) # This will be cpus-per-task for srun
 parser.add_argument('--sbatch_logging_dir', type=str, default='slurm_logs')
+parser.add_argument('--sbatch_mem', type=int, default=50)  # Memory in GB
 
 # Model testbed arguments
 parser.add_argument('--out_dir', type=str, default=f'model_training/{now}')
@@ -57,6 +58,7 @@ parser.add_argument('--coord_check', action='store_true')
 # Evaluation parameters
 parser.add_argument('--eval_interval', type=int, default=10000000000)
 parser.add_argument('--log_interval', type=int, default=1)
+parser.add_argument('--avg_interval', type=int, default=30)
 parser.add_argument('--eval_iters', type=int, default=300)
 parser.add_argument('--eval_only', action='store_true')
 
@@ -77,6 +79,7 @@ parser.add_argument('--warmup_iters', type=int, default=None)
 parser.add_argument('--anneal_wd', action='store_true', help='Enable weight decay annealing')
 parser.add_argument('--wd_warmup_iters', type=int, default=1000, help='Weight decay warmup iterations')
 parser.add_argument('--wd_anneal_iters', type=int, default=1000, help='Weight decay anneal iterations')
+parser.add_argument('--adaptive_optimizer', action='store_true', help='Enable adaptive optimizer')
 
 # Model training parameters
 parser.add_argument('--n_layer', type=int, default=12)
@@ -188,7 +191,7 @@ shell_script = f"""#!/bin/bash
 
 #SBATCH --output={args.sbatch_logging_dir}/%j.out
 #SBATCH --error={args.sbatch_logging_dir}/%j.err
-#SBATCH --mem=16G
+#SBATCH --mem={args.sbatch_mem}G
 #SBATCH --partition=lowprio
 #SBATCH --qos=lowprio
 #SBATCH --distribution=block:block
@@ -201,6 +204,7 @@ TRAINING_ARGS=(
     --wandb_project='{args.wandb_project}'
     --eval_interval={args.eval_interval}
     --log_interval={args.log_interval}
+    --avg_interval={args.avg_interval}
     --eval_iters={args.eval_iters}
     --eval_only={args.eval_only}
     --init_from='{args.init_from}'
@@ -245,6 +249,7 @@ TRAINING_ARGS=(
     --slurm_array_task_id="$SLURM_ARRAY_TASK_ID"
     --wd_warmup_iters={args.wd_warmup_iters}
     --wd_anneal_iters={args.wd_anneal_iters}
+    --adaptive_optimizer={args.adaptive_optimizer}
 )
 
 srun --export=ALL,MASTER_ADDR,MASTER_PORT,WORKDIR,requirements \\

@@ -9,6 +9,8 @@
 import numpy as np
 from copy import deepcopy
 
+DEBUG = True
+
 # LEARNING_RATE_SAMPLES = 30
 # learning_rates = [
 #     10**p for p in np.linspace(-4.0, -2.5, LEARNING_RATE_SAMPLES)
@@ -19,15 +21,15 @@ from copy import deepcopy
 #     10**p for p in np.linspace(-2.5, -0.5, LEARNING_RATE_SAMPLES)
 # ]
 
-LEARNING_RATE_SAMPLES = 50
+LEARNING_RATE_SAMPLES = 50 if not DEBUG else 1
 learning_rates = [
     10**p for p in np.linspace(-4.25, -1, LEARNING_RATE_SAMPLES)
 ]
 
 base_weight_decay = 0.1
 
-seeds = [42, 43, 44]# , 45, 46, 47]
-WANDB_PROJECT = 'layernorm-study-l2-table-skinny'
+seeds = [42, 43, 44] if not DEBUG else [42]
+WANDB_PROJECT = 'layernorm-study-l2-table-1b'
 
 # model_config = {
 #     'n_embd': 512, 
@@ -44,19 +46,35 @@ WANDB_PROJECT = 'layernorm-study-l2-table-skinny'
 #     'mup': 'false',    
 # }
 
+# model_config = {
+#     'n_embd': 128, 
+#     'n_head': 8, 
+#     'n_kv_head': 8, 
+#     'n_layer': 64, 
+#     'weight_decay': base_weight_decay, 
+#     'log_wandb': 'true', 
+#     'wandb_project': WANDB_PROJECT, 
+#     'n_gpus': 2, 
+#     'gradient_accumulation_steps': 2, 
+#     'batch_size': 50, 
+#     'max_iters': 3882,
+#     'mup': 'false',    
+# }
+
 model_config = {
-    'n_embd': 128, 
-    'n_head': 8, 
-    'n_kv_head': 8, 
-    'n_layer': 64, 
+    'n_embd': 1408, 
+    'n_head': 22, 
+    'n_kv_head': 22, 
+    'n_layer': 15, 
     'weight_decay': base_weight_decay, 
     'log_wandb': 'true', 
     'wandb_project': WANDB_PROJECT, 
-    'n_gpus': 2, 
-    'gradient_accumulation_steps': 2, 
-    'batch_size': 50, 
+    'n_gpus': 8, 
+    'gradient_accumulation_steps': 8, 
+    'batch_size': 40, 
     'max_iters': 3882,
     'mup': 'false',    
+    'dtype': 'float16',
 }
 
 configs = []
@@ -85,30 +103,30 @@ for lr in learning_rates:
 
         configs.append(conf)
 
-        conf = deepcopy(conf)
-        conf['q_prelayer_normalization'] = 'LayerNormWithBias'
-        conf['k_prelayer_normalization'] = 'L2Norm'
-        configs.append(conf)
+        # conf = deepcopy(conf)
+        # conf['q_prelayer_normalization'] = 'LayerNormWithBias'
+        # conf['k_prelayer_normalization'] = 'L2Norm'
+        # configs.append(conf)
 
-        conf = deepcopy(conf)
-        conf['q_prelayer_normalization'] = 'LayerNormWithBias'
-        conf['k_prelayer_normalization'] = 'LayerNorm'
-        configs.append(conf)
+        # conf = deepcopy(conf)
+        # conf['q_prelayer_normalization'] = 'LayerNormWithBias'
+        # conf['k_prelayer_normalization'] = 'LayerNorm'
+        # configs.append(conf)
 
-        conf = deepcopy(conf)
-        conf['q_prelayer_normalization'] = 'L2NormScale'
-        conf['k_prelayer_normalization'] = 'L2NormScale'
-        configs.append(conf)
+        # conf = deepcopy(conf)
+        # conf['q_prelayer_normalization'] = 'L2NormScale'
+        # conf['k_prelayer_normalization'] = 'L2NormScale'
+        # configs.append(conf)
 
-        conf = deepcopy(conf)
-        conf['q_prelayer_normalization'] = 'L2NormScale'
-        conf['k_prelayer_normalization'] = 'L2Norm'
-        configs.append(conf)
+        # conf = deepcopy(conf)
+        # conf['q_prelayer_normalization'] = 'L2NormScale'
+        # conf['k_prelayer_normalization'] = 'L2Norm'
+        # configs.append(conf)
 
-        conf = deepcopy(conf)
-        conf['q_prelayer_normalization'] = 'LayerNormWithBias'
-        conf['k_prelayer_normalization'] = 'L2NormScale'
-        configs.append(conf)
+        # conf = deepcopy(conf)
+        # conf['q_prelayer_normalization'] = 'LayerNormWithBias'
+        # conf['k_prelayer_normalization'] = 'L2NormScale'
+        # configs.append(conf)
 
 if __name__ == "__main__":
     import json

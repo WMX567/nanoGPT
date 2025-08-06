@@ -95,6 +95,7 @@ class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        self.config = config
         assert config.n_embd % config.n_head == 0
         assert config.n_head % config.n_kv_head == 0, f"Expected config.n_head {config.n_head} to be divisible by config.n_kv_head {config.n_kv_head}"
         self.impl = config.impl
@@ -105,6 +106,7 @@ class CausalSelfAttention(nn.Module):
         self.c_q = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # n_embd / n_kv_reps = n_kv_head * head_size
         self.c_kv = nn.Linear(config.n_embd, 2 * config.n_embd // self.n_kv_reps, bias=config.bias)
+        self.c_kv.kv = True
 
         self.kv_capture = Capture()
 
@@ -166,6 +168,14 @@ class CausalSelfAttention(nn.Module):
 
         k = repeat_kv(k, self.n_kv_reps).transpose(1, 2) # (B, nh, T, hs)
         v = repeat_kv(v, self.n_kv_reps).transpose(1, 2) # (B, nh, T, hs)
+
+        if self.config.n_head != self.n_kv_head:
+            head_size = self.config.n_embd // self.config.n_head
+            H = head_size * self.config.n_kv_head
+            m = self.config.mup_multiplier
+
+            # k = k * (m**(1/2) / H**(1/2))
+            # v = v * (m**(1/2) / H**(1/2))
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
@@ -350,7 +360,13 @@ class GPT(nn.Module):
                 # target_mult = r**(-1/2)
                 # target_mult = m**(1/2) / (r**(1/2) * (n**(1/2) + H**(1/2)))
                 # target_mult = H**(1/2) / ( m**(1/2) + H**(1/2) / n0**(1/2) )
-                target_mult = m**(1/2) * 1 / ( r**(1/2) * (n**(1/2) + H**(1/2)) )
+                # target_mult = m**(1/2) * H**(1/2) * 1 / ( r**(1/2) * (n**(1/2) + H**(1/2)) )
+                target_mult = H**(1/2) / r**(1/2)
+                target_mult = m**(1/2) / ( r**(1/2) * ( m**(1/2) + (H / n0)**(1/2) ) )
+                # target_mult = H**(1/2) / ( r**(1/2) * (m**(1/2) + (H / n0)**(1/2)) )
+                # target_mult = 1 / ( r**(1/2) * (m**(1/2) + (H / n0)**(1/2)) )
+                target_mult = m**(1/2) / ( r**(1/2) * ( m**(1/2) + (H / n0)**(1/2) ) )
+                target_mult = m**(1/2) / ( r**(1/2) * ( n**(1/2) + (H)**(1/2) ) )
             
             torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['hidden']['init_std'](self.config.mup_multiplier) * target_mult)
 
@@ -459,7 +475,7 @@ class GPT(nn.Module):
         extra_args = dict(fused=True) if use_fused else dict()
 
         optim_groups = []
-        embedding_type, hidden_type, unembedding_type = self._get_weight_groups()
+        embedding_type, hidden_type, kv_type, unembedding_type = self._get_weight_groups(kv=True)
 
         et_group = {}
         et_group['params'] = embedding_type
@@ -472,6 +488,18 @@ class GPT(nn.Module):
         ht_group['lr_scale'] = self.impl['hidden']['lr_scale'](self.config.mup_multiplier)
         ht_group['wd_scale'] = self.impl['hidden']['wd_scale'](self.config.mup_multiplier)
         optim_groups.append(ht_group)
+
+        kv_group = {}
+        kv_group['params'] = kv_type
+        if self.config.n_head != self.config.n_kv_head:
+            H = self.config.n_kv_head * (self.config.n_embd // self.config.n_head)
+            r = self.config.n_head // self.config.n_kv_head
+            kv_group['lr_scale'] = 1/(self.config.mup_multiplier**(1/2) * H**(1/2)) / r**(1/2)
+            kv_group['wd_scale'] = (self.config.mup_multiplier**(1/2) * H**(1/2)) * r**(1/2)
+        else:
+            kv_group['lr_scale'] = self.impl['hidden']['lr_scale'](self.config.mup_multiplier)
+            kv_group['wd_scale'] = self.impl['hidden']['wd_scale'](self.config.mup_multiplier)
+        optim_groups.append(kv_group)
 
         ut_group = {}
         ut_group['params'] = unembedding_type
