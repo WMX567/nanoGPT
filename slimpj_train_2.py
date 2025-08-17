@@ -108,6 +108,7 @@ complete_p_layers = False
 slurm_job_id = 0
 slurm_array_task_id = 0
 anneal_wd = False
+min_wd = 0.0 # minimum weight decay for annealing
 wd_warmup_iters = 1000
 wd_anneal_iters = 1000
 # -----------------------------------------------------------------------------
@@ -164,7 +165,10 @@ ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=
 
 # poor man's data loader
 if dataset != 'slim_pajama':
-    data_dir = os.path.join('data', dataset)
+    if dataset == 'openwebtext':
+        data_dir = '/mnt/weka/home/kyle.chickering/code/nanoGPT-fsdp/data/openwebtext'
+    else:
+        data_dir = os.path.join('data', dataset)
     def get_batch(split):
         # We recreate np.memmap every batch to avoid a memory leak, as per
         # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
@@ -183,6 +187,10 @@ if dataset != 'slim_pajama':
         return x, y
 else:
     slim_pj_cropped_vocab_size = 50257
+    slim_pj_full_vocab_size = 250222
+
+    compression_ratio = slim_pj_full_vocab_size // slim_pj_cropped_vocab_size
+
     path_prefix = "/mnt/sharefs/data/pretrain_tokenized/SlimPajama-627B_250k_tokenized/merged/slimpajama-train-chunk1"
     slimpj_dataset = IndexedDataset(path_prefix)
 
@@ -218,11 +226,22 @@ else:
 
                 data_buffer = data_buffer[1:]
 
-        x = torch.tensor(X_batch, dtype=torch.long)
-        y = torch.tensor(Y_batch, dtype=torch.long)
+        # x = torch.tensor(X_batch, dtype=torch.long)
+        # y = torch.tensor(Y_batch, dtype=torch.long)
+
+        x = torch.tensor(X_batch) / compression_ratio
+        y = torch.tensor(Y_batch) / compression_ratio
+
+        x = x.to(dtype=torch.long)
+        y = y.to(dtype=torch.long)
 
         x = x.clip(0, slim_pj_cropped_vocab_size - 1)
         y = y.clip(0, slim_pj_cropped_vocab_size - 1)
+
+        # print(f"shapes: {x.shape}, {y.shape}")
+
+        # x = torch.div(x, compression_ratio, rounding_mode='floor')
+        # y = torch.div(y, compression_ratio, rounding_mode='floor')
 
         if device_type == 'cuda':
             # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
@@ -425,9 +444,9 @@ def get_wd_annealed(it):
     elif it < wd_warmup_iters + wd_anneal_iters:
         decay_ratio = (it - wd_warmup_iters) / wd_anneal_iters
         assert 0 <= decay_ratio <= 1
-        return weight_decay * (1.0 - decay_ratio)
+        return weight_decay - (weight_decay - min_wd) * decay_ratio
     else:
-        return 0.0
+        return min_wd
 
 def get_wd_const(it):
     return weight_decay
