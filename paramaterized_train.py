@@ -32,9 +32,6 @@ def gpt_params(seq_len, vocab_size, d_model, num_heads, num_layers):
 
 now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-file_dir = os.path.dirname(os.path.abspath(__file__))
-TRAINING_SCRIPT = os.path.join(file_dir, 'slimpj_train_2.py')
-
 parser = argparse.ArgumentParser()
 # Sbatch arguments
 parser.add_argument('--sbatch_timeout', type=str, default='50:00:00')
@@ -77,9 +74,11 @@ parser.add_argument('--cooldown_iters', type=int, default=1000)  # For WSD decay
 parser.add_argument('--tpp', type=int, default=5)
 parser.add_argument('--warmup_iters', type=int, default=None)
 parser.add_argument('--anneal_wd', action='store_true', help='Enable weight decay annealing')
+parser.add_argument('--min_wd', type=float, default=0.0, help='Minimum weight decay for annealing')
 parser.add_argument('--wd_warmup_iters', type=int, default=1000, help='Weight decay warmup iterations')
 parser.add_argument('--wd_anneal_iters', type=int, default=1000, help='Weight decay anneal iterations')
 parser.add_argument('--adaptive_optimizer', action='store_true', help='Enable adaptive optimizer')
+parser.add_argument('--use_fsdp', action='store_true', help='Enable FSDP (Fully Sharded Data Parallel)')
 
 # Model training parameters
 parser.add_argument('--n_layer', type=int, default=12)
@@ -109,7 +108,27 @@ parser.add_argument('--beta2', type=float, default=0.95)
 parser.add_argument('--grad_clip', type=float, default=1.0)
 parser.add_argument('--decay_lr', action='store_true')
 
+# -------------------------
+# Mixture-of-Experts (MoE) arguments
+# -------------------------
+# Enable MoE
+parser.add_argument('--use_moe', nargs='?', const='true', default=False,
+                    type=lambda s: str(s).lower() in ('true','1','yes','y','t'),
+                    help='Enable mixture-of-experts')
+# Core MoE knobs (used by model config)
+parser.add_argument('--num_experts', type=int, default=0, help='number of experts (if 0 or 1 MoE is disabled)')
+parser.add_argument('--moe_ffn_hidden_size', type=int, default=128, help='hidden size of each expert')
+parser.add_argument('--router_topk', type=int, default=1, help='top-k experts to select')
+parser.add_argument('--moe_seq_aux_loss_coeff', type=float, default=0.0, help='coefficient for MoE aux loss')
+# -------------------------
+
 args = parser.parse_args()
+
+file_dir = os.path.dirname(os.path.abspath(__file__))
+if args.use_fsdp:
+    TRAINING_SCRIPT = os.path.join(file_dir, 'slimpj_fsdp.py')
+else:
+    TRAINING_SCRIPT = os.path.join(file_dir, 'slimpj_train_2.py')
 
 os.makedirs(args.sbatch_logging_dir, exist_ok=True)
 os.makedirs(args.out_dir, exist_ok=True)
@@ -194,7 +213,7 @@ shell_script = f"""#!/bin/bash
 #SBATCH --mem={args.sbatch_mem}G
 #SBATCH --partition=lowprio
 #SBATCH --qos=lowprio
-#SBATCH --distribution=block:block
+#SBATCH --distribution=pack
 
 {dist_args}
 
@@ -223,6 +242,7 @@ TRAINING_ARGS=(
     --min_lr={args.min_lr}
     --max_iters={args.max_iters}
     --anneal_wd={args.anneal_wd}
+    --min_wd={args.min_wd}
     --lr_decay_iters={args.lr_decay_iters}
     --warmup_iters={args.warmup_iters}
     --weight_decay={args.weight_decay}
@@ -250,11 +270,18 @@ TRAINING_ARGS=(
     --wd_warmup_iters={args.wd_warmup_iters}
     --wd_anneal_iters={args.wd_anneal_iters}
     --adaptive_optimizer={args.adaptive_optimizer}
+    --use_moe={args.use_moe}
+    --num_experts={args.num_experts}
+    --moe_ffn_hidden_size={args.moe_ffn_hidden_size}
+    --router_topk={args.router_topk}
+    --moe_seq_aux_loss_coeff={args.moe_seq_aux_loss_coeff}
 )
 
 srun --export=ALL,MASTER_ADDR,MASTER_PORT,WORKDIR,requirements \\
-    --container-mounts="/mnt:/mnt" \\
-    torchrun "${{DISTRIBUTED_ARGS[@]}}" {TRAINING_SCRIPT} "${{TRAINING_ARGS[@]}}"
+    torchrun "${{DISTRIBUTED_ARGS[@]}}" {TRAINING_SCRIPT} "${{TRAINING_ARGS[@]}}" &
+    
+SRUN_PID=$!
+wait $SRUN_PID
 """
 
 try:    

@@ -29,7 +29,8 @@ from megatron.core.datasets.indexed_dataset import _IndexReader, IndexedDataset
 from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from model import GPTConfig, GPT
+# from model import GPTConfig, GPT
+from model_moe_kyle import GPTConfig, GPT
 from mup_implementations import (
     impl_dict
 )
@@ -111,6 +112,30 @@ anneal_wd = False
 min_wd = 0.0 # minimum weight decay for annealing
 wd_warmup_iters = 1000
 wd_anneal_iters = 1000
+use_moe: bool = False
+# -------- MoE-related knobs (1,3,4,5,6,7) ----------
+use_moe: bool = False
+num_experts: int = 0
+router_topk: int = 8
+moe_ffn_hidden_size: int = 128
+moe_seq_aux_loss_coeff: float = 1e-4
+
+# moe_ffn_hidden_size: int = 128                       # per-expert hidden
+# moe_shared_expert_intermediate_size: int = 128       # shared branch hidden
+# moe_router_score_function: str = 'sigmoid'           # (3)
+# moe_router_pre_softmax: bool = True                  # (3)
+# moe_router_topk: int = 1                             # (3)
+# moe_router_bias_update_rate: float = 0.0             # (3) set >0 to enable bias nudging
+# moe_router_enable_expert_bias: bool = False          # (3)
+# moe_router_topk_saling_dummy: float = 1.0            # kept for compatibility; not used
+# moe_router_topk_scaling_factor: float = 1.0          # (3)
+# moe_router_dtype: str = 'fp32'                       # 'fp32' or 'fp64' (3)
+# moe_router_ema_alpha: float = 0.1                    # (3) smoothing for usage EMA
+# moe_token_dispatcher_type: str = 'alltoall'          # (4) simulated single-GPU
+# moe_capacity_factor: float = 1.25                    # (5)
+# moe_router_load_balancing_type: str = 'seq_aux_loss' # (6)
+# moe_aux_loss_coeff: float = 0.0                      # (6) set >0 to enable
+# moe_debug: bool = False                               # enable verbose MoE debug prints
 # -----------------------------------------------------------------------------
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open('configurator.py').read()) # overrides from command line or config file
@@ -274,11 +299,29 @@ else:
 
 # model init
 # model init
-model_args = dict(n_layer=n_layer, n_head=n_head, n_kv_head=n_kv_head, n_embd=n_embd, block_size=block_size,
-                  bias=bias, vocab_size=None, dropout=dropout, mup=mup, 
-                  mup_multiplier=mup_multiplier, init_std=init_std,
-                  impl=ptimpl, normalization=normalization, complete_p_layers=complete_p_layers,
-                  q_prelayer_normalization=q_prelayer_normalization, k_prelayer_normalization=k_prelayer_normalization,)
+model_args = dict(
+    n_layer=n_layer, 
+    n_head=n_head, 
+    n_kv_head=n_kv_head, 
+    n_embd=n_embd, 
+    block_size=block_size,
+    bias=bias, 
+    vocab_size=None, 
+    dropout=dropout, 
+    mup=mup, 
+    mup_multiplier=mup_multiplier, 
+    init_std=init_std,
+    impl=ptimpl, 
+    normalization=normalization, 
+    complete_p_layers=complete_p_layers,
+    q_prelayer_normalization=q_prelayer_normalization, 
+    k_prelayer_normalization=k_prelayer_normalization,
+    use_moe=use_moe,
+    num_experts=num_experts,
+    moe_ffn_hidden_size=moe_ffn_hidden_size,
+    router_topk=router_topk,
+    moe_seq_aux_loss_coeff=moe_seq_aux_loss_coeff,
+)
 
 if init_from == 'scratch':
     # init a new model from scratch
@@ -386,7 +429,10 @@ if compile:
 
 # wrap model into DDP container
 if ddp:
-    model = DDP(model, device_ids=[ddp_local_rank])
+    # MoE can leave some expert parameters unused on a given forward pass which
+    # breaks the default DDP reduction. Enable find_unused_parameters so DDP
+    # tolerates parameters that do not participate in every forward.
+    model = DDP(model, device_ids=[ddp_local_rank], find_unused_parameters=False)
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
@@ -398,7 +444,10 @@ def estimate_loss():
         for k in range(eval_iters):
             X, Y = get_batch(split)
             with ctx:
-                logits, loss = model(X, Y)
+                if use_moe:
+                    logits, loss, _ = model(X, Y)
+                else:
+                    logits, loss = model(X, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()
     model.train()
@@ -530,6 +579,12 @@ while True:
 
     # forward backward update, with optional gradient accumulation to simulate larger batch size
     # and using the GradScaler if data type is float16
+    # accumulate MoE aux loss across micro-steps to log properly
+    if use_moe:
+        moe_aux_accum = torch.tensor(0.0, device=device)
+    else:
+        moe_aux_accum = None
+
     for micro_step in range(gradient_accumulation_steps):
         if ddp:
             # in DDP training we only need to sync gradients at the last micro step.
@@ -538,12 +593,21 @@ while True:
             # looking at the source of that context manager, it just toggles this variable
             model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
         with ctx:
-            logits, loss = model(X, Y)
+            if use_moe:
+                logits, loss, moe_aux = model(X, Y)
+                # detach and accumulate the raw aux (sum over micro-steps). Do not .item() here
+                moe_aux_accum = moe_aux_accum + moe_aux.detach().to(device)
+            else:
+                logits, loss = model(X, Y)
             loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         X, Y = get_batch('train')
         # backward pass, with gradient scaling if training in fp16
         scaler.scale(loss).backward()
+    # after micro-steps: final MoE aux for this iteration is the accumulated sum over micro-steps
+    if use_moe:
+        moe_aux = moe_aux_accum
+
     # clip the gradient
     if grad_clip != 0.0:
         scaler.unscale_(optimizer)
@@ -562,6 +626,8 @@ while True:
         # get loss as float. note: this is a CPU-GPU sync point
         # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
         lossf = loss.item() * gradient_accumulation_steps
+        if use_moe:
+            moe_auxf = moe_aux * gradient_accumulation_steps
         if local_iter_num >= 5: # let the training loop settle a bit
             mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt)
             running_mfu = mfu if running_mfu == -1.0 else 0.9*running_mfu + 0.1*mfu
@@ -577,6 +643,12 @@ while True:
                 if param.grad is not None:
                     layer_norm_data[f"norm/{name}"] = param.grad.norm().item()
 
+            moe_data = {}
+            if use_moe:
+                moe_data = {
+                    "moe_aux_loss": moe_auxf,
+                }
+
             wandb.log({
                 "iter": iter_num,
                 "train/loss": lossf,
@@ -587,6 +659,7 @@ while True:
                 "wd": wd,
                 "train/avg_loss": sum(avg_loss) / len(avg_loss),
                 **layer_norm_data,
+                **moe_data,
                 # "abs_grad_norm": abs_grad_norm,
             })
 
