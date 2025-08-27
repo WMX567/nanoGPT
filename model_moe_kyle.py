@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from typing import List
 
 from mup_implementations import standard_param_impl
 
@@ -233,14 +234,7 @@ class MLP(nn.Module):
         x = self.dropout(x)
         return x
 
-
-# New: MoE implementation (vectorized, no Python loops over experts)
 class MoE(nn.Module):
-    """A simple, fully-vectorized sparse MoE with top-k routing.
-    - No Python loops over experts: all expert computations are done with batched ops/einsum.
-    - Returns (output, seq_aux_loss) where seq_aux_loss is a scalar tensor (0 if not applicable).
-    Notes: This implementation trades memory for simplicity and performance (should work well for moderate
-    num_experts)."""
     def __init__(self, config):
         super().__init__()
         self.num_experts = config.num_experts
@@ -249,22 +243,127 @@ class MoE(nn.Module):
         hidden = config.moe_ffn_hidden_size
         E = self.num_experts
 
-        # gating network
         self.w_gating = nn.Linear(in_dim, E, bias=True)
-        # optional router bias (learned bias per expert)
         self.router_bias = nn.Parameter(torch.zeros(E))
 
-        # expert parameters (stacked so we can compute all experts in parallel)
-        # fc1: (E, in_dim, hidden)
-        init_std = config.init_std * 0.01
+        init_std = config.init_std
         self.fc1_weight = nn.Parameter(torch.randn(E, in_dim, hidden) * init_std)
-        self.fc1_bias = nn.Parameter(torch.zeros(E, hidden))
-        # fc2: (E, hidden, in_dim)
+        self.fc1_bias = nn.Parameter(torch.zeros(E, hidden)) if config.bias else None
         self.fc2_weight = nn.Parameter(torch.randn(E, hidden, in_dim) * init_std)
-        self.fc2_bias = nn.Parameter(torch.zeros(E, in_dim))
+        self.fc2_bias = nn.Parameter(torch.zeros(E, in_dim)) if config.bias else None
 
         self.act = nn.GELU()
         self.dropout = nn.Dropout(config.dropout)
+
+    def _forward_sparse(self, x, topk_idx, gates):
+        B, T, C = x.shape
+        k = topk_idx.size(2)
+
+        # Memory-efficient, group-by-expert + batched matmul approach.
+        device = x.device
+        dtype = x.dtype
+
+        # Flatten token-expert selections and corresponding inputs
+        flat_idx = topk_idx.reshape(-1)                  # (N,) where N = B*T*k
+        N = flat_idx.numel()
+        x_exp = x.unsqueeze(2).expand(-1, -1, k, -1).reshape(N, C)  # (N, C)
+
+        # Find unique experts and inverse mapping (maps each position -> 0..U-1)
+        unique_experts, inverse = torch.unique(flat_idx, return_inverse=True)
+        U = unique_experts.numel()
+        if U == 0:
+            return torch.zeros(B, T, k, C, device=device, dtype=dtype)
+
+        # Sort positions by expert to make contiguous groups
+        perm = torch.argsort(inverse)
+        inverse_sorted = inverse[perm]
+        x_sorted = x_exp[perm]  # (N, C)
+
+        # Counts per expert and grouping boundaries
+        counts = torch.bincount(inverse_sorted, minlength=U)
+        max_count = int(counts.max().item())
+        starts = torch.cat((torch.tensor([0], device=device, dtype=counts.dtype), counts.cumsum(0)[:-1]))
+
+        # Pack inputs into (U, max_count, C) with zero-padding
+        x_grouped = torch.zeros(U, max_count, C, device=device, dtype=dtype)
+        for i in range(U):
+            cnt = int(counts[i].item())
+            if cnt == 0:
+                continue
+            s = int(starts[i].item())
+            x_grouped[i, :cnt] = x_sorted[s:s+cnt]
+
+        # Gather per-expert parameters once (U is small)
+        weight1_u = self.fc1_weight[unique_experts]  # (U, C, H)
+        if self.fc1_bias is not None:
+            bias1_u = self.fc1_bias[unique_experts]      # (U, H)
+
+        # Batched matmul: (U, max_count, C) x (U, C, H) -> (U, max_count, H)
+        h_grouped = torch.bmm(x_grouped, weight1_u)
+        if self.fc1_bias is not None:
+            h_grouped.add_(bias1_u.unsqueeze(1))  # (U, max_count, H)
+
+        # Unpack grouped outputs back to sorted-flat layout
+        h_sorted_flat = torch.empty(N, h_grouped.size(-1), device=device, dtype=dtype)
+        for i in range(U):
+            cnt = int(counts[i].item())
+            if cnt == 0:
+                continue
+            s = int(starts[i].item())
+            h_sorted_flat[s:s+cnt] = h_grouped[i, :cnt]
+
+        # Unpermute to original flat order and reshape to (B, T, k, H)
+        inv_perm = torch.empty_like(perm)
+        inv_perm[perm] = torch.arange(N, device=device)
+        h_flat = h_sorted_flat[inv_perm]
+        H = h_flat.size(-1)
+        h = h_flat.view(B, T, k, H)
+
+        # Activation + dropout
+        h = self.act(h)
+        h = self.dropout(h)
+
+        # Second projection: follow same grouped-batched strategy
+        # Flatten h for second projection
+        h_exp = h.reshape(N, H)
+        h_sorted = h_exp[perm]
+
+        weight2_u = self.fc2_weight[unique_experts]  # (U, H, C)
+        if self.fc2_bias is not None:
+            bias2_u = self.fc2_bias[unique_experts]      # (U, C)
+
+        # Pack h_sorted into (U, max_count, H)
+        h_grouped2 = torch.zeros(U, max_count, H, device=device, dtype=dtype)
+        for i in range(U):
+            cnt = int(counts[i].item())
+            if cnt == 0:
+                continue
+            s = int(starts[i].item())
+            h_grouped2[i, :cnt] = h_sorted[s:s+cnt]
+
+        # Batched matmul: (U, max_count, H) x (U, H, C) -> (U, max_count, C)
+        out_grouped = torch.bmm(h_grouped2, weight2_u)
+        if self.fc2_bias is not None:
+            out_grouped.add_(bias2_u.unsqueeze(1))  # (U, max_count, C)
+
+        # Unpack back to flat sorted -> unpermute -> reshape
+        out_sorted_flat = torch.empty(N, C, device=device, dtype=dtype)
+        for i in range(U):
+            cnt = int(counts[i].item())
+            if cnt == 0:
+                continue
+            s = int(starts[i].item())
+            out_sorted_flat[s:s+cnt] = out_grouped[i, :cnt]
+
+        out_flat = out_sorted_flat[inv_perm]
+        out_view = out_flat.view(B, T, k, C)
+
+        # Multiply per-position outputs by corresponding gate values and scatter-add into final output y
+        y = torch.zeros(B, T, C, device=device, dtype=out_view.dtype)
+        gate_vals = gates.gather(2, topk_idx)               # (B, T, k)
+        y = (out_view * gate_vals.unsqueeze(-1)).sum(dim=2)  # (B, T, C)
+
+        return y
 
     def forward(self, x):
         # x: (B, T, C)
@@ -272,41 +371,20 @@ class MoE(nn.Module):
         device = x.device
         E = self.num_experts
 
-        # gating logits -> probabilities
         logits = self.w_gating(x) + self.router_bias.view(1, 1, E)
         gates = F.softmax(logits, dim=-1)  # (B, T, E)
 
-        # top-k sparsification: build a sparse gate matrix with only topk entries
-        if self.topk < E:
-            topk_vals, topk_idx = gates.topk(self.topk, dim=-1)  # (B,T,topk)
-            sparse_gates = torch.zeros_like(gates)
-            sparse_gates.scatter_(2, topk_idx, topk_vals)
-            gates = sparse_gates
-
-        # Compute expert outputs for all experts in parallel (vectorized)
-        # Expand x to (B, T, E, C) by broadcasting
-        x_e = x.unsqueeze(2).expand(B, T, E, C)  # (B, T, E, C)
-
-        # fc1: einsum over input with per-expert weights -> (B, T, E, H)
-        h = torch.einsum('btec, ecd -> bted', x_e, self.fc1_weight) + self.fc1_bias.view(1, 1, E, -1)
-        h = self.act(h)
-        h = self.dropout(h)
-
-        # fc2: (B, T, E, C)
-        out = torch.einsum('bted, edc -> btec', h, self.fc2_weight) + self.fc2_bias.view(1, 1, E, -1)
-
-        # combine experts weighted by gates
-        # gates: (B, T, E) -> unsqueeze -> (B, T, E, 1)
-        y = (gates.unsqueeze(-1) * out).sum(dim=2)  # (B, T, C)
-
-        # auxiliary sequence-level load-balancing loss (simple importance-based loss)
-        # importance: total gate mass per expert over the sequence and batch
+        # Compute aux loss
         importance = gates.sum(dim=(0, 1))  # (E,)
-        # normalize
         importance_mean = importance / (B * T)
-        aux = float(0.0)
-        if E > 0:
-            aux = (E * (importance_mean ** 2).sum()).to(device)
+        aux = (E * (importance_mean ** 2).sum()).to(device)
+
+        topk_vals, topk_idx = gates.topk(self.topk, dim=-1)  # (B,T,topk)
+        sparse_gates = torch.zeros_like(gates)
+        sparse_gates.scatter_(2, topk_idx, topk_vals)
+        gates = sparse_gates
+
+        y = self._forward_sparse(x, topk_idx, gates)
 
         return y, aux
 
@@ -359,6 +437,7 @@ class GPTConfig:
     num_experts: int = 64
     moe_seq_aux_loss_coeff: float = 1e-4
     moe_ffn_hidden_size: int = 128
+    moe_ffn_mup_multiplier: float = 1.0
     
 class GPT(nn.Module):
 
@@ -416,6 +495,9 @@ class GPT(nn.Module):
         hidden_type = []
         kv_type = []
         unembedding_type = [self.lm_head.weight]
+        router_type = []
+        router_bias_type = []
+        moe_ffn_type = []
         layer_norms = []
 
         for block in reversed(self.transformer.h):
@@ -425,29 +507,29 @@ class GPT(nn.Module):
             # handle different FFN types (MLP or MoE)
             if hasattr(block, 'ffn'):
                 ffn = block.ffn
-                # standard MLP
                 if isinstance(ffn, MLP):
                     hidden_type.append(ffn.c_fc.weight)
                     hidden_type.append(ffn.c_proj.weight)
-                # MoE: include gating and expert parameter tensors
                 else:
                     # include gating network params
                     if hasattr(ffn, 'w_gating'):
-                        hidden_type.append(ffn.w_gating.weight)
+                        router_type.append(ffn.w_gating.weight)
                         if hasattr(ffn.w_gating, 'bias') and ffn.w_gating.bias is not None:
-                            hidden_type.append(ffn.w_gating.bias)
+                            router_bias_type.append(ffn.w_gating.bias)
                     # router bias
                     if hasattr(ffn, 'router_bias'):
-                        hidden_type.append(ffn.router_bias)
+                        router_bias_type.append(ffn.router_bias)
                     # expert weights (stacked tensors)
                     if hasattr(ffn, 'fc1_weight'):
-                        hidden_type.append(ffn.fc1_weight)
-                    if hasattr(ffn, 'fc1_bias'):
-                        hidden_type.append(ffn.fc1_bias)
+                        moe_ffn_type.append(ffn.fc1_weight)
+                    if hasattr(ffn, 'fc1_bias') and ffn.fc1_bias is not None:
+                        print(ffn.fc1_bias)
+                        raise ValueError("FC biases are not supported in MoE implementation")
                     if hasattr(ffn, 'fc2_weight'):
-                        hidden_type.append(ffn.fc2_weight)
-                    if hasattr(ffn, 'fc2_bias'):
-                        hidden_type.append(ffn.fc2_bias)
+                        moe_ffn_type.append(ffn.fc2_weight)
+                    if hasattr(ffn, 'fc2_bias') and ffn.fc2_bias is not None:
+                        print(ffn.fc2_bias)
+                        raise ValueError("FC biases are not supported in MoE implementation")
             else:
                 # backwards compatibility with attribute name 'mlp'
                 if hasattr(block, 'mlp'):
@@ -455,49 +537,28 @@ class GPT(nn.Module):
                     hidden_type.append(block.mlp.c_proj.weight)
 
         for n, p in self.named_parameters():
-            if "bias" in n and self.config.mup:
+            if ("bias" in n) and (self.config.mup) and \
+                (p is not None) and \
+                ('router' not in n) and \
+                ('gating' not in n):
                 raise ValueError(f"Biases are not supported in {self.impl['name']} implementation, found {n}")
 
         if kv:
-            return embedding_type, hidden_type, kv_type, unembedding_type
+            return embedding_type, hidden_type, kv_type, unembedding_type, router_type, router_bias_type, moe_ffn_type
         else:
-            return embedding_type, hidden_type + kv_type, unembedding_type
+            return embedding_type, hidden_type + kv_type, unembedding_type, router_type, router_bias_type, moe_ffn_type
         
     def _init_weights(self, module):
         if not self.config.mup:
             return
             
         n0 = self.config.n_embd / self.config.mup_multiplier
-        et, ht, kv, ut = self._get_weight_groups(kv=True)
+        et, ht, kv, ut, rt, rbt, mft = self._get_weight_groups(kv=True)
         for p in et:
             torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['embedding']['init_std'](self.config.mup_multiplier))
 
         for p in kv:
             target_mult = 1.0
-
-            # if self.config.n_head // self.config.n_kv_head > 1:
-            #     # if we have kv heads we have to fiddle with the initialization distribution
-            #     r = self.config.n_head // self.config.n_kv_head
-            #     head_size = self.config.n_embd // self.config.n_head
-            #     H = self.config.n_kv_head * head_size
-            #     m = self.config.mup_multiplier
-            #     n = self.config.n_embd
-            #     n0 = n / m
-            #     # target_mult = m**(1/2) * H**(1/2)**(m/n)**(1/2) / ( m**(1/2)*(m**(1/2) + H**(1/2)*(m/n)**(1/2)) )
-            #     # target_mult = m**(1/2) / (r**(1/2)*(n**(1/2) + H**(1/2)))*(n0**(1/2) + H**(1/2))
-            #     target_mult = m**(1/2) * ( 1 + (H / n0)**(1/2) ) / ( r**(1/2) * (m**(1/2) + (H / n0)**(1/2)) )
-            #     # target_mult = r**(-1/2)
-            #     # target_mult = m**(1/2) / (r**(1/2) * (n**(1/2) + H**(1/2)))
-            #     # target_mult = H**(1/2) / ( m**(1/2) + H**(1/2) / n0**(1/2) )
-            #     # target_mult = m**(1/2) * H**(1/2) * 1 / ( r**(1/2) * (n**(1/2) + H**(1/2)) )
-            #     target_mult = H**(1/2) / r**(1/2)
-            #     target_mult = m**(1/2) / ( r**(1/2) * ( m**(1/2) + (H / n0)**(1/2) ) )
-            #     # target_mult = H**(1/2) / ( r**(1/2) * (m**(1/2) + (H / n0)**(1/2)) )
-            #     # target_mult = 1 / ( r**(1/2) * (m**(1/2) + (H / n0)**(1/2)) )
-            #     target_mult = m**(1/2) / ( r**(1/2) * ( m**(1/2) + (H / n0)**(1/2) ) )
-            #     target_mult = m**(1/2) / ( r**(1/2) * ( n**(1/2) + (H)**(1/2) ) )
-            
-            # torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['hidden']['init_std'](self.config.mup_multiplier) * target_mult)
 
             if 'kv_layer' in self.impl.keys():
                 r = self.config.n_head // self.config.n_kv_head
@@ -510,6 +571,15 @@ class GPT(nn.Module):
 
         for p in ut:
             torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['unembedding']['init_std'](self.config.mup_multiplier))
+
+        for p in rt:
+            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['router']['init_std'](self.config.mup_multiplier, self.config.num_experts))
+
+        for p in rbt:
+            torch.nn.init.zeros_(p)
+
+        for p in mft:
+            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['moe_ffn']['init_std'](self.config.mup_multiplier, self.config.moe_ffn_mup_multiplier))
 
     def forward(self, idx, targets=None):
         device = idx.device
@@ -630,7 +700,7 @@ class GPT(nn.Module):
         extra_args = dict(fused=True) if use_fused else dict()
 
         optim_groups = []
-        embedding_type, hidden_type, kv_type, unembedding_type = self._get_weight_groups(kv=True)
+        embedding_type, hidden_type, kv_type, unembedding_type, router_type, router_bias_type, moe_ffn_type = self._get_weight_groups(kv=True)
 
         et_group = {}
         et_group['params'] = embedding_type
@@ -661,6 +731,30 @@ class GPT(nn.Module):
         ut_group['wd_scale'] = self.impl['unembedding']['wd_scale'](self.config.mup_multiplier)
         optim_groups.append(ut_group)
 
+        rt_group = {}
+        if len(router_type) > 0:
+            rt_group['params'] = router_type
+            router_group_dict = self.impl['router'] if 'router' in self.impl else self.impl['hidden']
+            rt_group['lr_scale'] = router_group_dict['lr_scale'](self.config.mup_multiplier, self.config.num_experts)
+            rt_group['wd_scale'] = router_group_dict['wd_scale'](self.config.mup_multiplier, self.config.num_experts)
+            optim_groups.append(rt_group)
+
+        rbt_group = {}
+        if len(router_bias_type) > 0:
+            rbt_group['params'] = router_bias_type
+            router_bias_group_dict = self.impl['router_bias'] if 'router_bias' in self.impl else self.impl['hidden']
+            rbt_group['lr_scale'] = router_bias_group_dict['lr_scale'](self.config.mup_multiplier, self.config.num_experts)
+            rbt_group['wd_scale'] = router_bias_group_dict['wd_scale'](self.config.mup_multiplier, self.config.num_experts)
+            optim_groups.append(rbt_group)
+
+        mft_group = {}
+        if len(moe_ffn_type) > 0:
+            mft_group['params'] = moe_ffn_type
+            moe_ffn_group_dict = self.impl['moe_ffn'] if 'moe_ffn' in self.impl else self.impl['hidden']
+            mft_group['lr_scale'] = moe_ffn_group_dict['lr_scale'](self.config.mup_multiplier, self.config.moe_ffn_mup_multiplier)
+            mft_group['wd_scale'] = moe_ffn_group_dict['wd_scale'](self.config.mup_multiplier, self.config.moe_ffn_mup_multiplier)
+            optim_groups.append(mft_group)
+
         layer_norms = [p for n, p in self.named_parameters() if 'ln_' in n]
         layer_norms_group = {
             'params': layer_norms,
@@ -686,20 +780,55 @@ class GPT(nn.Module):
         return optimizer
 
     def estimate_mfu(self, fwdbwd_per_iter, dt):
-        """ estimate model flops utilization (MFU) in units of A100 bfloat16 peak FLOPS """
-        # first estimate the number of flops we do per iteration.
-        # see PaLM paper Appendix B as ref: https://arxiv.org/abs/2204.02311
+        """ estimate model flops utilization (MFU) in units of A100 bfloat16 peak FLOPS
+        This version provides a different estimate when using a Mixture-of-Experts (MoE):
+        - For non-MoE models we keep the original heuristic.
+        - For MoE models we replace the standard FFN cost with the cost of executing
+          `router_topk` experts per token (each expert does two linear projections).
+        """
+        # basic sizes
         N = self.get_num_params()
         cfg = self.config
-        L, H, Q, T = cfg.n_layer, cfg.n_head, cfg.n_embd//cfg.n_head, cfg.block_size
-        flops_per_token = 6*N + 12*L*H*Q*T
-        flops_per_fwdbwd = flops_per_token * T
-        flops_per_iter = flops_per_fwdbwd * fwdbwd_per_iter
-        # express our flops throughput as ratio of A100 bfloat16 peak flops
-        flops_achieved = flops_per_iter * (1.0/dt) # per second
-        # flops_promised = 312e12 # A100 GPU bfloat16 peak flops is 312 TFLOPS
-        # flops_promised = 67e12 # H200 GPU fp32 peak flops 
-        flops_promised = 985e12 # H200 GPU bfloat16 peak flops
+        L = cfg.n_layer
+        H = cfg.n_head
+        Q = cfg.n_embd // cfg.n_head
+        T = cfg.block_size
+
+        # original coarse PaLM-style heuristic
+        flops_per_token_orig = 6 * N + 12 * L * H * Q * T
+
+        use_moe = getattr(cfg, 'use_moe', False)
+        if not use_moe:
+            flops_per_fwdbwd = flops_per_token_orig * T
+            flops_per_iter = flops_per_fwdbwd * fwdbwd_per_iter
+        else:
+            # Estimate attention + other non-FFN work by subtracting a heuristic
+            # standard FFN cost from the original term, then add MoE cost.
+            # Standard MLP hidden size is typically 4 * n_embd.
+            n_embd = cfg.n_embd
+            std_ffn_hidden = 4 * n_embd
+            # heuristic standard FFN flops per token per layer (two matmuls: n_embd->hidden and hidden->n_embd)
+            std_ffn_flops_per_token_per_layer = 2 * n_embd * std_ffn_hidden
+            std_ffn_total = L * std_ffn_flops_per_token_per_layer
+
+            # approximate the non-FFN component contained in the original heuristic
+            attention_and_other = max(flops_per_token_orig - std_ffn_total, 0.0)
+
+            # MoE cost: each selected expert does two matmuls of sizes (n_embd x moe_hidden) and (moe_hidden x n_embd)
+            topk = max(1, min(getattr(cfg, 'router_topk', 1), getattr(cfg, 'num_experts', 1)))
+            moe_hidden = getattr(cfg, 'moe_ffn_hidden_size', std_ffn_hidden)
+            moe_ffn_flops_per_token_per_layer = topk * (2 * n_embd * moe_hidden)
+            moe_ffn_total = L * moe_ffn_flops_per_token_per_layer
+
+            # final per-token cost: non-FFN work + MoE-executed FFN work + parameter-related term (6*N)
+            flops_per_token = 6 * N + attention_and_other + moe_ffn_total
+            flops_per_fwdbwd = flops_per_token * T
+            flops_per_iter = flops_per_fwdbwd * fwdbwd_per_iter
+
+        # express our flops throughput as ratio of H200 bf16 peak flops
+        flops_achieved = flops_per_iter * (1.0 / dt)  # per second
+        # H200 bf16 peak FLOPS
+        flops_promised = 1979e12
         mfu = flops_achieved / flops_promised
         return mfu
 
