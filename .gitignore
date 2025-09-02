@@ -11,3 +11,7 @@ input.txt
 env/
 venv/
 slurm-*.out
+coord-check-impl/*
+mup_paper_experiments/experiment_logs/*
+mup_paper_experiments/results/*
+mup_paper_experiments/slurm_logs/*
