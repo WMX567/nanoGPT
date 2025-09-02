@@ -28,7 +28,7 @@ import wandb
 from contextlib import nullcontext
 from megatron.core.datasets.indexed_dataset import _IndexReader, IndexedDataset
 
-from model import GPTConfig, GPT
+from model_moe_kyle import GPTConfig, GPT
 from mup_implementations import (
     impl_dict
 )
@@ -73,7 +73,7 @@ max_iters = 600000 # total number of training iterations
 weight_decay = 0.0
 beta1 = 0.9
 beta2 = 0.95
-eps = 1e-12 
+eps = 1e-8 
 grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
 decay_lr = True # whether to decay the learning rate
@@ -97,6 +97,14 @@ bias = False
 init_std = 0.02
 coord_check = True
 normalization = "LayerNorm"
+tag = "default"  # Tag for coordinate checking data
+use_moe: bool = False
+num_experts: int = 0
+router_topk: int = 8
+moe_ffn_hidden_size: int = 128
+moe_seq_aux_loss_coeff: float = 1e-4
+moe_ffn_mup_multiplier: float = 1.0
+moe_random_router: bool = False
 # -----------------------------------------------------------------------------
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open('configurator.py').read()) # overrides from command line or config file
@@ -115,7 +123,10 @@ ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=
 
 if dataset != 'slim_pajama':
     # poor man's data loader
-    data_dir = os.path.join('data', dataset)
+    if dataset == 'openwebtext':
+        data_dir = '/mnt/weka/home/kyle.chickering/code/nanoGPT-fsdp/data/openwebtext'
+    else:
+        data_dir = os.path.join('data', dataset)
     def get_batch(split):
         # We recreate np.memmap every batch to avoid a memory leak, as per
         # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
@@ -201,7 +212,12 @@ else:
 model_args = dict(n_layer=n_layer, n_head=n_head, n_kv_head=n_kv_head, n_embd=n_embd, block_size=block_size,
                   bias=bias, vocab_size=None, dropout=dropout, mup=mup, 
                   mup_multiplier=mup_multiplier, init_std=init_std,
-                  impl=ptimpl, normalization=normalization) # start with model_args from command line
+                  impl=ptimpl, normalization=normalization, use_moe=use_moe, 
+                  num_experts=num_experts, router_topk=router_topk, 
+                  moe_ffn_hidden_size=moe_ffn_hidden_size, 
+                  moe_seq_aux_loss_coeff=moe_seq_aux_loss_coeff, 
+                  moe_ffn_mup_multiplier=moe_ffn_mup_multiplier,
+                  moe_random_router=moe_random_router) # start with model_args from command line
 
 # init a new model from scratch
 print("Initializing a new model from scratch")
@@ -214,21 +230,44 @@ gptconf = GPTConfig(**model_args)
 model = GPT(gptconf)
 
 if coord_check:
-    from coordinate_checking import get_hooks
+    from coordinate_checking import get_hooks, get_moe_hooks
     data = {}
     hooks = []
     for i, layer in enumerate(model.transformer.h):
-        mlp = layer.mlp
+        if not use_moe:
+            mlp = layer.ffn
 
-        fc = mlp.c_fc
-        forward_hook = get_hooks(data, f"fc.{i}")
-        hook = fc.register_forward_hook(forward_hook)
-        hooks.append(hook)
+            fc = mlp.c_fc
+            forward_hook = get_hooks(data, f"fc.{i}")
+            hook = fc.register_forward_hook(forward_hook)
+            hooks.append(hook)
 
-        c_proj = mlp.c_proj
-        forward_hook = get_hooks(data, f"c_proj.{i}")
-        hook = c_proj.register_forward_hook(forward_hook)
-        hooks.append(hook)
+            c_proj = mlp.c_proj
+            forward_hook = get_hooks(data, f"c_proj.{i}")
+            hook = c_proj.register_forward_hook(forward_hook)
+            hooks.append(hook)
+        else:
+            mlp = layer.ffn
+
+            forward_hook = get_moe_hooks(data, f"moe.{i}", n_experts=num_experts)
+            hook = mlp.register_forward_hook(forward_hook)
+            hooks.append(hook)
+
+            if hasattr(mlp, 'w_gating'):
+                fc = mlp.w_gating
+                forward_hook = get_hooks(data, f"w_gating.{i}")
+                hook = fc.register_forward_hook(forward_hook)
+                hooks.append(hook)
+            else: # MLP layer
+                fc = mlp.c_fc
+                forward_hook = get_hooks(data, f"fc.{i}")
+                hook = fc.register_forward_hook(forward_hook)
+                hooks.append(hook)
+
+                c_proj = mlp.c_proj
+                forward_hook = get_hooks(data, f"c_proj.{i}")
+                hook = c_proj.register_forward_hook(forward_hook)
+                hooks.append(hook)
 
         attn = layer.attn
         forward_hook = get_hooks(data, f"attn.c_q.{i}")
@@ -287,7 +326,10 @@ def estimate_loss():
         for k in range(eval_iters):
             X, Y = get_batch(split)
             with ctx:
-                logits, loss = model(X, Y)
+                if use_moe:
+                    logits, loss, _ = model(X, Y)
+                else:
+                    logits, loss = model(X, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()
     model.train()
@@ -332,7 +374,10 @@ while True:
     # and using the GradScaler if data type is float16
     for micro_step in range(gradient_accumulation_steps):
         with ctx:
-            logits, loss = model(X, Y)
+            if use_moe:
+                logits, loss, _ = model(X, Y)
+            else:
+                logits, loss = model(X, Y)
             loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
         scaler.scale(loss).backward()
     # clip the gradient
@@ -382,6 +427,6 @@ if coord_check:
     from coordinate_checking import dataframe_from_data
     now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
-    df = dataframe_from_data(data, width=config['n_embd'], seed=seed)
+    df = dataframe_from_data(data, width=config['n_embd'], depth=config['n_layer'], seed=seed, tag=config['tag'])
     df.to_csv(os.path.join(out_dir, f'coord_check_{now}.csv'), index=False)
     print(f"Attempted to save coordinate checking data to {os.path.join(out_dir, f'coord_check_{now}.csv')}")

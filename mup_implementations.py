@@ -4,13 +4,18 @@
     may not want to initialize the parameters to be too small.
 """
 
+# moe_normalization = {(16, 1): {'mean': 0.01547195389866829, 'second_moment': 0.0043950434774160385, 'var': 0.0043950434774160385}, (16, 2): {'mean': 0.02429725043475628, 'second_moment': 0.0056337034329771996, 'var': 0.005340856499969959}, (32, 1): {'mean': 0.0050145359709858894, 'second_moment': 0.0009274088661186397, 'var': 0.0009274088661186397}, (32, 2): {'mean': 0.008538671769201756, 'second_moment': 0.0013688497710973024, 'var': 0.001332347048446536}, (32, 4): {'mean': 0.012858767062425613, 'second_moment': 0.0016539358766749501, 'var': 0.0015310612507164478}, (32, 6): {'mean': 0.016404369845986366, 'second_moment': 0.001887441729195416, 'var': 0.0016659017419442534}, (64, 1): {'mean': 0.001678807777352631, 'second_moment': 0.00021157803712412715, 'var': 0.00021157803712412715}, (64, 2): {'mean': 0.0028051871340721846, 'second_moment': 0.0002997160190716386, 'var': 0.00029580091359093785}, (64, 4): {'mean': 0.004376308526843786, 'second_moment': 0.00037874325062148273, 'var': 0.00036441677366383374}, (64, 6): {'mean': 0.005642833653837442, 'second_moment': 0.00041966678691096604, 'var': 0.00039323625969700515}, (64, 8): {'mean': 0.0067062354646623135, 'second_moment': 0.0004723559250123799, 'var': 0.0004333681717980653}, (96, 1): {'mean': 0.0008531124331057072, 'second_moment': 8.394233009312302e-05, 'var': 8.394233009312302e-05}, (96, 2): {'mean': 0.001444641500711441, 'second_moment': 0.00011901423567906022, 'var': 0.00011796689796028659}, (96, 4): {'mean': 0.0023627590853720903, 'second_moment': 0.00016536566545255482, 'var': 0.00016118932398967445}, (96, 6): {'mean': 0.002955435775220394, 'second_moment': 0.00017455393390264362, 'var': 0.00016728458285797387}, (96, 8): {'mean': 0.003553887130692601, 'second_moment': 0.0001940723304869607, 'var': 0.00018310653103981167}, (128, 1): {'mean': 0.0005325487582013011, 'second_moment': 4.178151721134782e-05, 'var': 4.178151721134782e-05}, (128, 2): {'mean': 0.0008786571561358869, 'second_moment': 5.7980723795481026e-05, 'var': 5.759113992098719e-05}, (128, 4): {'mean': 0.0014499116223305464, 'second_moment': 8.140745921991765e-05, 'var': 7.983914838405326e-05}, (128, 6): {'mean': 0.0018802577396854758, 'second_moment': 9.43701816140674e-05, 'var': 9.14352058316581e-05}, (128, 8): {'mean': 0.002260832581669092, 'second_moment': 0.00010461367492098361, 'var': 0.00010016431042458862}, (160, 1): {'mean': 0.0003685645933728665, 'second_moment': 2.587492417660542e-05, 'var': 2.587492417660542e-05}, (160, 2): {'mean': 0.0006289900629781187, 'second_moment': 3.7790498026879504e-05, 'var': 3.7590678402921185e-05}, (160, 4): {'mean': 0.0009955544956028461, 'second_moment': 4.764436016557738e-05, 'var': 4.690006608143449e-05}, (160, 6): {'mean': 0.0013121343217790127, 'second_moment': 5.571982546825893e-05, 'var': 5.428095391835086e-05}, (160, 8): {'mean': 0.0015899591380730271, 'second_moment': 6.401608698070049e-05, 'var': 6.181369099067524e-05}, (192, 1): {'mean': 0.0002732138673309237, 'second_moment': 1.6396628780057654e-05, 'var': 1.6396628780057654e-05}, (192, 2): {'mean': 0.0004633675853256136, 'second_moment': 2.5050818294403143e-05, 'var': 2.4938613933045417e-05}, (192, 4): {'mean': 0.0007485190872102976, 'second_moment': 3.297100920462981e-05, 'var': 3.254988769185729e-05}, (192, 6): {'mean': 0.000977308489382267, 'second_moment': 3.7663830880774185e-05, 'var': 3.687079151859507e-05}, (192, 8): {'mean': 0.0011840570950880647, 'second_moment': 4.1920895455405116e-05, 'var': 4.0695700590731576e-05}, (256, 1): {'mean': 0.0001677306863712147, 'second_moment': 8.981397513707634e-06, 'var': 8.981397513707634e-06}, (256, 2): {'mean': 0.00028188235592097044, 'second_moment': 1.2087404684280045e-05, 'var': 1.2046570191159844e-05}, (256, 4): {'mean': 0.00045969229540787637, 'second_moment': 1.58758648467483e-05, 'var': 1.5716639609308913e-05}, (256, 6): {'mean': 0.0006163989892229438, 'second_moment': 1.970986522792373e-05, 'var': 1.9392380636418238e-05}, (256, 8): {'mean': 0.0007432695711031556, 'second_moment': 2.182049138355069e-05, 'var': 2.1337315047276206e-05}, (288, 1): {'mean': 0.0001413515128660947, 'second_moment': 6.713459242746467e-06, 'var': 6.713459242746467e-06}, (288, 2): {'mean': 0.00023551103367935866, 'second_moment': 9.322157893620897e-06, 'var': 9.293853509007022e-06}, (288, 4): {'mean': 0.00038349369424395263, 'second_moment': 1.2528146726253908e-05, 'var': 1.2416461686370894e-05}, (288, 6): {'mean': 0.0005038768285885453, 'second_moment': 1.4882522009429522e-05, 'var': 1.4671314602310304e-05}, (288, 8): {'mean': 0.000609832291956991, 'second_moment': 1.650714511924889e-05, 'var': 1.6180665625142865e-05}, (384, 1): {'mean': 8.357792103197426e-05, 'second_moment': 3.201460231139208e-06, 'var': 3.2014600037655327e-06}, (384, 2): {'mean': 0.00014196512347552925, 'second_moment': 4.580230779538397e-06, 'var': 4.5700262489845045e-06}, (384, 4): {'mean': 0.00023344690271187574, 'second_moment': 6.014538939780323e-06, 'var': 5.973224688204937e-06}, (384, 6): {'mean': 0.00031763085280545056, 'second_moment': 7.613180969201494e-06, 'var': 7.528639343945542e-06}, (384, 8): {'mean': 0.00037939497269690037, 'second_moment': 8.39989024825627e-06, 'var': 8.273810635728296e-06}}
+moe_normalization = {(16, 1): {'mean': 0.0625, 'second_moment': 0.0625, 'var': 0.0625}, (16, 2): {'mean': 0.0625, 'second_moment': 0.033916573971509933, 'var': 0.0320110097527504}, (16, 4): {'mean': 0.0625, 'second_moment': 0.01880607195198536, 'var': 0.01589314453303814}, (16, 6): {'mean': 0.0625, 'second_moment': 0.01411302201449871, 'var': 0.010887223295867443}, (16, 8): {'mean': 0.0625, 'second_moment': 0.011723143979907036, 'var': 0.008338019251823425}, (32, 1): {'mean': 0.03125, 'second_moment': 0.03125, 'var': 0.03125}, (32, 2): {'mean': 0.03125, 'second_moment': 0.016787925735116005, 'var': 0.01632140763103962}, (32, 4): {'mean': 0.03125, 'second_moment': 0.00905268732458353, 'var': 0.008336645551025867}, (32, 6): {'mean': 0.03125, 'second_moment': 0.006467638071626425, 'var': 0.005668207537382841}, (32, 8): {'mean': 0.03125, 'second_moment': 0.005067960359156132, 'var': 0.004223378840833902}, (64, 1): {'mean': 0.015625, 'second_moment': 0.015625, 'var': 0.015625}, (64, 2): {'mean': 0.015625, 'second_moment': 0.008229429833590984, 'var': 0.008112039417028427}, (64, 4): {'mean': 0.015625, 'second_moment': 0.00446936534717679, 'var': 0.004292291589081287}, (64, 6): {'mean': 0.015625, 'second_moment': 0.0030782592948526144, 'var': 0.0028791045770049095}, (64, 8): {'mean': 0.015625, 'second_moment': 0.002466354053467512, 'var': 0.0022574865724891424}, (96, 1): {'mean': 0.0104166679084301, 'second_moment': 0.0104166679084301, 'var': 0.0104166679084301}, (96, 2): {'mean': 0.0104166679084301, 'second_moment': 0.005478119943290949, 'var': 0.005426134914159775}, (96, 4): {'mean': 0.0104166679084301, 'second_moment': 0.0029078221414238214, 'var': 0.0028287814930081367}, (96, 6): {'mean': 0.0104166679084301, 'second_moment': 0.002032627584412694, 'var': 0.0019443746423348784}, (96, 8): {'mean': 0.010416666977107525, 'second_moment': 0.0015953290276229382, 'var': 0.0015024726744741201}, (128, 1): {'mean': 0.0078125, 'second_moment': 0.0078125, 'var': 0.0078125}, (128, 2): {'mean': 0.0078125, 'second_moment': 0.004081728868186474, 'var': 0.004052353091537952}, (128, 4): {'mean': 0.0078125, 'second_moment': 0.002173644257709384, 'var': 0.0021292436867952347}, (128, 6): {'mean': 0.0078125, 'second_moment': 0.0014935785438865423, 'var': 0.0014438232174143195}, (128, 8): {'mean': 0.0078125, 'second_moment': 0.0011599297868087888, 'var': 0.0011075473157688975}, (160, 1): {'mean': 0.006250001024454832, 'second_moment': 0.006250001024454832, 'var': 0.006250001024454832}, (160, 2): {'mean': 0.006250001024454832, 'second_moment': 0.0032736631110310555, 'var': 0.0032549439929425716}, (160, 4): {'mean': 0.006250001024454832, 'second_moment': 0.0017443380784243345, 'var': 0.0017160006100311875}, (160, 6): {'mean': 0.006250001024454832, 'second_moment': 0.0012167622335255146, 'var': 0.0011851065792143345}, (160, 8): {'mean': 0.006250000558793545, 'second_moment': 0.0009247377165593207, 'var': 0.0008912454941309988}, (192, 1): {'mean': 0.00520833395421505, 'second_moment': 0.00520833395421505, 'var': 0.00520833395421505}, (192, 2): {'mean': 0.00520833395421505, 'second_moment': 0.0027292484883219004, 'var': 0.002716268878430128}, (192, 4): {'mean': 0.00520833395421505, 'second_moment': 0.0014389008283615112, 'var': 0.001419165637344122}, (192, 6): {'mean': 0.00520833395421505, 'second_moment': 0.000989018939435482, 'var': 0.0009669283754192293}, (192, 8): {'mean': 0.00520833395421505, 'second_moment': 0.0007598083466291428, 'var': 0.000736517715267837}, (256, 1): {'mean': 0.00390625, 'second_moment': 0.00390625, 'var': 0.00390625}, (256, 2): {'mean': 0.00390625, 'second_moment': 0.0020325195509940386, 'var': 0.0020251714158803225}, (256, 4): {'mean': 0.00390625, 'second_moment': 0.001071098493412137, 'var': 0.0010599802481010556}, (256, 6): {'mean': 0.00390625, 'second_moment': 0.0007360557210631669, 'var': 0.0007236235542222857}, (256, 8): {'mean': 0.00390625, 'second_moment': 0.0005705830990336835, 'var': 0.0005575019749812782}, (288, 1): {'mean': 0.0034722224809229374, 'second_moment': 0.0034722224809229374, 'var': 0.0034722224809229374}, (288, 2): {'mean': 0.0034722224809229374, 'second_moment': 0.001807409687899053, 'var': 0.0018016090616583824}, (288, 4): {'mean': 0.0034722224809229374, 'second_moment': 0.000943000428378582, 'var': 0.000934187846723944}, (288, 6): {'mean': 0.0034722224809229374, 'second_moment': 0.000645574415102601, 'var': 0.0006357254460453987}, (288, 8): {'mean': 0.0034722224809229374, 'second_moment': 0.0005028628511354327, 'var': 0.0004925166140310466}, (384, 1): {'mean': 0.002604166977107525, 'second_moment': 0.002604166977107525, 'var': 0.002604166977107525}, (384, 2): {'mean': 0.002604166977107525, 'second_moment': 0.0013605488929897547, 'var': 0.0013573018368333578}, (384, 4): {'mean': 0.002604166977107525, 'second_moment': 0.0007114792242646217, 'var': 0.0007065375684760511}, (384, 6): {'mean': 0.0026041667442768812, 'second_moment': 0.0004842511552851647, 'var': 0.00047871607239358127}, (384, 8): {'mean': 0.002604166977107525, 'second_moment': 0.00037192340823821723, 'var': 0.0003660951042547822}}
+
+
+
 # TODO: This is not the correct standard param implementation.
 standard_param_impl = {
     'name':                     'SP',
     'embedding': {
         'init_std':             lambda m: 1.0,
         'lr_scale':             lambda m: 1.0,
-        'wd_scale':             lambda m: 1.0,
+        'wd_scale':             lambda m: 0.0,
         'output_multiplier':    lambda m: 1.0
     },
     'hidden': {
@@ -28,11 +33,78 @@ standard_param_impl = {
     'normalization': {
         'lr_scale':             lambda m: 1.0,
     },
-    'attention_scale':          lambda d: 1 / d**(1/2)
+    'attention_scale':          lambda d: 1 / d**(1/2),
+    'depth_scale':              lambda L: 1.0,
 }
 
 tpv_left_impl = {
     'name':                     'TPV-L (muP)',
+    'embedding': {
+        'init_std':             lambda m: 1.0,
+        'lr_scale':             lambda m: 1.0,
+        'wd_scale':             lambda m: 0.0,
+        'output_multiplier':    lambda m: 1.0
+    },
+    'hidden': {
+        'init_std':             lambda m: 1 / m**(1/2),
+        'lr_scale':             lambda m: 1 / m,
+        'wd_scale':             lambda m: m,
+        'output_multiplier':    lambda m: 1.0
+    },
+    'kv_layer': {
+        'init_std':             lambda m, r: 1 / (m**(1/2) * (1 + r**(1/2))),
+        'lr_scale':             lambda m, r: 1 / (m * r**(1/2)),
+        'wd_scale':             lambda m, r: m * r**(1/2),
+        'output_multiplier':    lambda m, r: 1.0
+    },
+    'unembedding': {
+        'init_std':             lambda m: 1.0,
+        'lr_scale':             lambda m: 1.0,
+        'wd_scale':             lambda m: 1.0,
+        'output_multiplier':    lambda m: 1 / m
+    },
+    'normalization': {
+        'lr_scale':             lambda m: 1.0,
+    },
+    'attention_scale':          lambda d: 1 / d,
+    'depth_scale':              lambda L: 1 / L
+}
+
+tpv_left_impl_unit_wd = {
+    'name':                     'TPV-L (muP)',
+    'embedding': {
+        'init_std':             lambda m: 1.0,
+        'lr_scale':             lambda m: 1.0,
+        'wd_scale':             lambda m: 0.0,
+        'output_multiplier':    lambda m: 1.0
+    },
+    'hidden': {
+        'init_std':             lambda m: 1 / m**(1/2),
+        'lr_scale':             lambda m: 1 / m,
+        'wd_scale':             lambda m: 1.0,
+        'output_multiplier':    lambda m: 1.0
+    },
+    'kv_layer': {
+        'init_std':             lambda m, r: 1 / (m**(1/2) * (1 + r**(1/2))),
+        'lr_scale':             lambda m, r: 1 / (m * r**(1/2)),
+        'wd_scale':             lambda m, r: 1.0,
+        'output_multiplier':    lambda m, r: 1.0
+    },
+    'unembedding': {
+        'init_std':             lambda m: 1.0,
+        'lr_scale':             lambda m: 1.0,
+        'wd_scale':             lambda m: 1.0,
+        'output_multiplier':    lambda m: 1 / m
+    },
+    'normalization': {
+        'lr_scale':             lambda m: 1.0,
+    },
+    'attention_scale':          lambda d: 1 / d,
+    'depth_scale':              lambda L: 1 / L
+}
+
+tpv_left_impl_new_kv = {
+    'name':                     'TPV-L, new KV (muP)',
     'embedding': {
         'init_std':             lambda m: 1.0,
         'lr_scale':             lambda m: 1.0,
@@ -45,6 +117,12 @@ tpv_left_impl = {
         'wd_scale':             lambda m: m,
         'output_multiplier':    lambda m: 1.0
     },
+    'kv_layer': {
+        'init_std':             lambda m, r: 1 / m**(1/2),
+        'lr_scale':             lambda m, r: (r + r**(1/2)) / m,
+        'wd_scale':             lambda m, r: m / (r + r**(1/2)),
+        'output_multiplier':    lambda m, r: 1.0
+    },
     'unembedding': {
         'init_std':             lambda m: 1.0,
         'lr_scale':             lambda m: 1.0,
@@ -54,7 +132,74 @@ tpv_left_impl = {
     'normalization': {
         'lr_scale':             lambda m: 1.0,
     },
-    'attention_scale':          lambda d: 1 / d
+    'attention_scale':          lambda d: 1 / d,
+    'depth_scale':              lambda L: 1 / L
+}
+
+tpv_left_impl_new_kv_2 = {
+    'name':                     'TPV-L, new KV (muP)',
+    'embedding': {
+        'init_std':             lambda m: 1.0,
+        'lr_scale':             lambda m: 1.0,
+        'wd_scale':             lambda m: 1.0,
+        'output_multiplier':    lambda m: 1.0
+    },
+    'hidden': {
+        'init_std':             lambda m: 1 / m**(1/2),
+        'lr_scale':             lambda m: 1 / m,
+        'wd_scale':             lambda m: m,
+        'output_multiplier':    lambda m: 1.0
+    },
+    'kv_layer': {
+        'init_std':             lambda m, r: 1 / m**(1/2),
+        'lr_scale':             lambda m, r: (1 + r**(1/2)) / (2 * m),
+        'wd_scale':             lambda m, r: 2 * m / (1 + r**(1/2)),
+        'output_multiplier':    lambda m, r: 1.0
+    },
+    'unembedding': {
+        'init_std':             lambda m: 1.0,
+        'lr_scale':             lambda m: 1.0,
+        'wd_scale':             lambda m: 1.0,
+        'output_multiplier':    lambda m: 1 / m
+    },
+    'normalization': {
+        'lr_scale':             lambda m: 1.0,
+    },
+    'attention_scale':          lambda d: 1 / d,
+    'depth_scale':              lambda L: 1 / L
+}
+
+tpv_left_impl_new_kv_static = {
+    'name':                     'TPV-L, new KV (muP)',
+    'embedding': {
+        'init_std':             lambda m: 1.0,
+        'lr_scale':             lambda m: 1.0,
+        'wd_scale':             lambda m: 1.0,
+        'output_multiplier':    lambda m: 1.0
+    },
+    'hidden': {
+        'init_std':             lambda m: 1 / m**(1/2),
+        'lr_scale':             lambda m: 1 / m,
+        'wd_scale':             lambda m: m,
+        'output_multiplier':    lambda m: 1.0
+    },
+    'kv_layer': {
+        'init_std':             lambda m, r: 1 / m**(1/2),
+        'lr_scale':             lambda m, r: (r + r**(1/2)) / (2 * m),
+        'wd_scale':             lambda m, r: 2 * m / (r + r**(1/2)),
+        'output_multiplier':    lambda m, r: 1.0
+    },
+    'unembedding': {
+        'init_std':             lambda m: 1.0,
+        'lr_scale':             lambda m: 1.0,
+        'wd_scale':             lambda m: 1.0,
+        'output_multiplier':    lambda m: 1 / m
+    },
+    'normalization': {
+        'lr_scale':             lambda m: 1.0,
+    },
+    'attention_scale':          lambda d: 1 / d,
+    'depth_scale':              lambda L: 1 / L
 }
 
 # Table from Cerebras which fixed the learning rate across
@@ -82,7 +227,8 @@ tpv_right_impl = {
     'normalization': {
         'lr_scale':             lambda m: 1.0,
     },
-    'attention_scale':          lambda d: 1 / d
+    'attention_scale':          lambda d: 1 / d,
+    'depth_scale':              lambda L: 1.0,
 }
 
 # Untied weights.
@@ -111,7 +257,74 @@ xllm_impl = {
     'normalization': {
         'lr_scale':             lambda m: 1.0 / m,
     },
-    'attention_scale':          lambda d: 1 / d
+    'attention_scale':          lambda d: 1 / d,
+    'depth_scale':              lambda L: 1.0,
+}
+
+mengxi_impl = {
+    'name':                     'xLLM (muP) Mengxi Candidate KV Scaling',
+    'embedding': {
+        'init_std':             lambda m: 1.0 / m,
+        'lr_scale':             lambda m: 1.0 / m,
+        'wd_scale':             lambda m: m,
+        'output_multiplier':    lambda m: m,
+    },
+    'hidden': {
+        'init_std':             lambda m: 1.0 / m**(1/2),
+        'lr_scale':             lambda m: 1.0 / m,
+        'wd_scale':             lambda m: m,
+        'output_multiplier':    lambda m: 1.0
+    },
+    'kv_layer': {
+        'init_std':             lambda m, r: r / m**(1/2),
+        'lr_scale':             lambda m, r: 1 / m,
+        'wd_scale':             lambda m, r: m,
+        'output_multiplier':    lambda m, r: 1.0 / r,
+    },
+    'unembedding': {
+        'init_std':             lambda m: 1.0 / m,
+        'lr_scale':             lambda m: 1.0 / m,
+        'wd_scale':             lambda m: m,
+        'output_multiplier':    lambda m: 1.0,
+    },
+    'normalization': {
+        'lr_scale':             lambda m: 1.0 / m,
+    },
+    'attention_scale':          lambda d: 1 / d,
+    'depth_scale':              lambda L: 1.0,
+}
+
+kyle_impl = {
+    'name':                     'xLLM (muP) Kyle Candidate KV Scaling',
+    'embedding': {
+        'init_std':             lambda m: 1.0 / m,
+        'lr_scale':             lambda m: 1.0 / m,
+        'wd_scale':             lambda m: m,
+        'output_multiplier':    lambda m: m,
+    },
+    'hidden': {
+        'init_std':             lambda m: 1.0 / m**(1/2),
+        'lr_scale':             lambda m: 1.0 / m,
+        'wd_scale':             lambda m: m,
+        'output_multiplier':    lambda m: 1.0
+    },
+    'kv_layer': {
+        'init_std':             lambda m, r: (1 + r**(1/2)) / (2 * m**(1/2)),
+        'lr_scale':             lambda m, r: 1 / m,
+        'wd_scale':             lambda m, r: m,
+        'output_multiplier':    lambda m, r: 2 / (1 + r**(1/2)),
+    },
+    'unembedding': {
+        'init_std':             lambda m: 1.0 / m,
+        'lr_scale':             lambda m: 1.0 / m,
+        'wd_scale':             lambda m: m,
+        'output_multiplier':    lambda m: 1.0,
+    },
+    'normalization': {
+        'lr_scale':             lambda m: 1.0 / m,
+    },
+    'attention_scale':          lambda d: 1 / d,
+    'depth_scale':              lambda L: 1.0 / L,
 }
 
 muS_impl = {
@@ -137,13 +350,130 @@ muS_impl = {
     'normalization': {
         'lr_scale':             lambda m: 1.0,
     },
-    'attention_scale':          lambda d: 1 / d
+    'attention_scale':          lambda d: 1 / d,
+    'depth_scale':              lambda L: 1.0,
+}
+
+moe_base = {
+    'name':                     'TPV-L, new KV (muP)',
+    'embedding': {
+        'init_std':             lambda m: 1.0,
+        'lr_scale':             lambda m: 1.0,
+        'wd_scale':             lambda m: 0.0,
+        'output_multiplier':    lambda m: 1.0
+    },
+    'hidden': {
+        'init_std':             lambda m: 1 / m**(1/2),
+        'lr_scale':             lambda m: 1 / m,
+        'wd_scale':             lambda m: m,
+        'output_multiplier':    lambda m: 1.0
+    },
+    'kv_layer': {
+        'init_std':             lambda m, r: 1 / m**(1/2),
+        'lr_scale':             lambda m, r: (1 + r**(1/2)) / (2 * m),
+        'wd_scale':             lambda m, r: 2 * m / (1 + r**(1/2)),
+        'output_multiplier':    lambda m, r: 1.0
+    },
+    'unembedding': {
+        'init_std':             lambda m: 1.0,
+        'lr_scale':             lambda m: 1.0,
+        'wd_scale':             lambda m: 1.0,
+        'output_multiplier':    lambda m: 1 / m
+    },
+    'router': {
+        'init_std':             lambda m, E: E**(1/2) / (m**(1/2) * (E**(1/2) + m**(1/2))), # Assumes embedding layer >> E
+        'lr_scale':             lambda m, E: 1 / m,
+        'wd_scale':             lambda m, E: 0.0,
+        'output_multiplier':    lambda m, E: 1.0
+    },
+    'router_bias': {
+        'init_std':             lambda m, E: 1.0,
+        'lr_scale':             lambda m, E: 1.0,
+        'wd_scale':             lambda m, E: 0.0,
+        'output_multiplier':    lambda m, E: 1.0
+    },
+    'moe_ffn_1': {
+        'init_std':             lambda n, ffn_n: ffn_n**(1/2) / ( n**(1/2)*(ffn_n**(1/2) + n**(1/2)) ),
+        'lr_scale':             lambda m, ffn_m, E, k: 1 / m, # * moe_normalization[(E, k)]['second_moment']**(1/2) / (moe_normalization[(E, k)]['mean'] + 1e-10),
+        'wd_scale':             lambda m, ffn_m, E, k: m,
+        'output_multiplier':    lambda m, ffn_m, E, k: 1.0
+    },
+    'moe_ffn_2': {
+        'init_std':             lambda n, ffn_n: n**(1/2) / ( ffn_n**(1/2)*(ffn_n**(1/2) + n**(1/2)) ),
+        'lr_scale':             lambda m, ffn_m, E, k: 1 / ffn_m, # * moe_normalization[(E, k)]['second_moment']**(1/2) / (moe_normalization[(E, k)]['mean'] + 1e-10),
+        'wd_scale':             lambda m, ffn_m, E, k: ffn_m,
+        'output_multiplier':    lambda m, ffn_m: 1.0,
+    },
+    'normalization': {
+        'lr_scale':             lambda m: 1.0,
+    },
+    'attention_scale':          lambda d: 1 / d,
+    'depth_scale':              lambda L: 1 / L
+}
+
+moe_fsdp = {
+    'name':                     'TPV-L, new KV (muP)',
+    'embedding': {
+        'init_std':             lambda m: 1.0 / m,
+        'lr_scale':             lambda m: 1.0 / m,
+        'wd_scale':             lambda m: 0.0,
+        'output_multiplier':    lambda m: m,
+    },
+    'hidden': {
+        'init_std':             lambda m: 1 / m**(1/2),
+        'lr_scale':             lambda m: 1 / m,
+        'wd_scale':             lambda m: m,
+        'output_multiplier':    lambda m: 1.0
+    },
+    'kv_layer': {
+        'init_std':             lambda m, r: (1 + r**(1/2)) / (2 * m**(1/2)),
+        'lr_scale':             lambda m, r: 1 / m,
+        'wd_scale':             lambda m, r: m,
+        'output_multiplier':    lambda m, r: 2 / (1 + r**(1/2)),
+    },
+    'unembedding': {
+        'init_std':             lambda m: 1.0 / m,
+        'lr_scale':             lambda m: 1.0 / m,
+        'wd_scale':             lambda m: m,
+        'output_multiplier':    lambda m: 1.0,
+    },
+    'router': {
+        'init_std':             lambda m, E: E**(1/2) / (m**(1/2) * (E**(1/2) + m**(1/2))), # Assumes embedding layer >> E
+        'lr_scale':             lambda m, E: 1.0 / m,
+        'wd_scale':             lambda m, E: 0.0,
+        'output_multiplier':    lambda m, E: 1.0
+    },
+    'router_bias': {
+        'init_std':             lambda m, E: 1.0 / m,
+        'lr_scale':             lambda m, E: 1.0 / m,
+        'wd_scale':             lambda m, E: 0.0,
+        'output_multiplier':    lambda m, E: m
+    },
+    'moe_ffn': {
+        'init_std':             lambda m, ffn_m: ffn_m / m * 1 / ffn_m**(1/2),
+        'lr_scale':             lambda m, ffn_m: 1 / m,
+        'wd_scale':             lambda m, ffn_m: m,
+        'output_multiplier':    lambda m, ffn_m: m / ffn_m
+    },
+    'normalization': {
+        'lr_scale':             lambda m: 1.0 / m,
+    },
+    'attention_scale':          lambda d: 1 / d,
+    'depth_scale':              lambda L: 1 / L
 }
 
 impl_dict = {
     'standard_param_impl': standard_param_impl,
     'tpv_left_impl': tpv_left_impl,
+    'tpv_left_impl_unit_wd': tpv_left_impl_unit_wd,
+    'tpv_left_impl_new_kv': tpv_left_impl_new_kv,
+    'tpv_left_impl_new_kv_static': tpv_left_impl_new_kv_static,
+    'tpv_left_impl_new_kv_2': tpv_left_impl_new_kv_2,
     'tpv_right_impl': tpv_right_impl,
     'xllm_impl': xllm_impl,
+    'mengxi_impl': mengxi_impl,
+    'kyle_impl': kyle_impl,
     'muS_impl': muS_impl,
+    'moe_base': moe_base,
+    'moe_fsdp': moe_fsdp,
 }

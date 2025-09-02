@@ -48,13 +48,13 @@ sbatch_headers = f"""#!/bin/bash
 #SBATCH --array=0-{num_experiments-1}%{min(args.max_concurrent, num_experiments)}
 #SBATCH --job-name=kyle_orchestrator
 #SBATCH --time=50:00:00
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=1
 #SBATCH --output={orchastrator_dir}/%A_%a.out
 #SBATCH --error={orchastrator_dir}/%A_%a.err
 #SBATCH --mem=8G
 #SBATCH --partition=lowprio
 #SBATCH --qos=lowprio
-#SBATCH --distribution=block:block
+#SBATCH --distribution=pack
 
 """
 
@@ -107,7 +107,11 @@ ARGS+=" --sbatch_logging_dir {logging_dir}"
 """
 
 command_str = """echo $ARGS\n"""
-command_str += f"""python {COMMAND_FILE} $ARGS"""
+command_str += f"""python {COMMAND_FILE} $ARGS &
+
+PID=$!
+wait $PID
+"""
 
 shell_script = sbatch_headers + config_str + parsing_str + command_str
 

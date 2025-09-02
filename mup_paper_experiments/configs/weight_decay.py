@@ -3,6 +3,9 @@
 # python crawl_wandb.py --entity krchickering-uc-davis --project wd-sweep-new --output-dir ./mup_paper_experiments/results/ablations/wd-sweep-new
 # python crawl_wandb.py --entity krchickering-uc-davis --project wd-sweep-3 --output-dir ./mup_paper_experiments/results/ablations/wd-sweep-
 # python crawl_wandb.py --entity krchickering-uc-davis --project wd-sweep-4 --output-dir ./mup_paper_experiments/results/ablations/wd-sweep-4
+# python crawl_wandb.py --entity krchickering-uc-davis --project wd-sweep-5 --output-dir ./mup_paper_experiments/results/ablations/wd-sweep-5
+# python crawl_wandb.py --entity krchickering-uc-davis --project wd-sweep-6 --output-dir ./mup_paper_experiments/results/ablations/wd-sweep-6
+# python crawl_wandb.py --entity krchickering-uc-davis --project wd-sweep-0-embedding-wd --output-dir ./mup_paper_experiments/results/ablations/wd-sweep-0-embedding-wd
 
 
 
@@ -11,30 +14,34 @@ from copy import deepcopy
 
 PROD = True
 
-MODEL_DEPTH = 8
+MODEL_DEPTH = 4
 
-LEARNING_RATE_SAMPLES = 5 if PROD else 1
+LEARNING_RATE_SAMPLES = 7 if PROD else 1
 learning_rates = [
     10**p for p in np.linspace(-3.5, -2, LEARNING_RATE_SAMPLES)
 ]
 WEIGHT_DECAY_SAMPLES = 11 if PROD else 1
 weight_decays = [
-    10**p for p in np.linspace(-2, .5, WEIGHT_DECAY_SAMPLES)
+    10**p for p in np.linspace(-2.5, 0, WEIGHT_DECAY_SAMPLES)
 ]
 
-seeds = [42, 43, 44] if PROD else [42]
+seeds = [42, 43] if PROD else [42]
 
-WANDB_PROJECT = 'wd-sweep-4'
+WANDB_PROJECT = 'wd-sweep-0-embedding-wd'
 
 shared_params = {
     'log_wandb': 'true',
     'wandb_project': WANDB_PROJECT,
-    'eval_interval': 50,
-    'eval_iters': 100,
+    'eval_interval': 100,
+    'eval_iters': 25,
     'decay_profile': 'cosine',
     'decay_lr': 'true',
     'n_layer': MODEL_DEPTH,
     'avg_interval': 120,
+    'dataset': 'openwebtext',
+    'sbatch_timeout': '03:00:00' if PROD else '00:05:00',   
+    'partition': 'main',
+    'qos': 'k2m'
 }
 
 # model_configs = [
@@ -45,33 +52,34 @@ shared_params = {
 
 # Constant data. Keeps training curves "stacked"
 model_configs = [
-    {'n_embd': 384,  'n_head': 6,   'n_kv_head': 6,  'n_gpus': 2, 'gradient_accumulation_steps': 2,  'batch_size': 104, 'max_iters': 1250 },
-    {'n_embd': 512,  'n_head': 8,   'n_kv_head': 8,  'n_gpus': 2, 'gradient_accumulation_steps': 2,  'batch_size': 104, 'max_iters': 1250 },
+    # {'n_embd': 384,  'n_head': 6,   'n_kv_head': 6,  'n_gpus': 2, 'gradient_accumulation_steps': 2,  'batch_size': 90, 'max_iters': 285 * 3 },
+    # {'n_embd': 512,  'n_head': 8,   'n_kv_head': 8,  'n_gpus': 2, 'gradient_accumulation_steps': 2,  'batch_size': 111, 'max_iters': 351 * 3 },
+    {'n_embd': 1024, 'n_head': 16,  'n_kv_head': 16, 'n_gpus': 4, 'gradient_accumulation_steps': 4,  'batch_size': 96, 'max_iters': 608 * 4},
     # {'n_embd': 2048, 'n_head': 32,  'n_kv_head': 32, 'n_gpus': 2, 'gradient_accumulation_steps': 2,  'batch_size': 104, 'max_iters': 1250, 'sbatch_mem': 256},
 ]
 
 configs = []
-for mup in [True, False]:
-    for lr in learning_rates:
-        for wd in weight_decays:
-            for seed in seeds:
-                for conf in model_configs:
-                    conf = deepcopy(conf)
+for seed in seeds:
+    for impl in ['tpv_left_impl', 'tpv_left_impl_unit_wd', 'standard_param_impl']: #, 'tpv_left_impl', 'tpv_left_impl_unit_wd']:
+        for cfg in model_configs:
+            for lr in learning_rates:
+                for wd in weight_decays:
+                    conf = deepcopy(cfg)
                     conf['learning_rate'] = lr
                     conf['weight_decay'] = wd
                     conf['seed'] = seed
 
                     conf['min_lr'] = lr / 10
 
-                    if mup:
-                        conf['mup'] = 'true'
-                        conf['mup_multiplier'] = float(conf['n_embd'] / 384)
-                        conf['impl'] = 'tpv_left_impl'
-                    else:
+                    if impl == 'standard_param_impl':
                         conf['mup'] = 'false'
                         conf['mup_multiplier'] = 1.0
                         conf['impl'] = 'standard_param_impl'
-
+                    else:
+                        conf['mup'] = 'true'
+                        conf['mup_multiplier'] = float(conf['n_embd'] / 384)
+                        conf['impl'] = impl
+                        
                     conf.update(shared_params)
                     configs.append(conf)
 

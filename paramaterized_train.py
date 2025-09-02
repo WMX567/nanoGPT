@@ -41,6 +41,8 @@ parser.add_argument('--n_gpus', type=int, default=8) # This will be nproc_per_no
 parser.add_argument('--cpus-per-task', type=int, default=16) # This will be cpus-per-task for srun
 parser.add_argument('--sbatch_logging_dir', type=str, default='slurm_logs')
 parser.add_argument('--sbatch_mem', type=int, default=50)  # Memory in GB
+parser.add_argument('--partition', type=str, default='lowprio')
+parser.add_argument('--qos', type=str, default='lowprio')
 
 # Model testbed arguments
 parser.add_argument('--out_dir', type=str, default=f'model_training/{now}')
@@ -108,6 +110,9 @@ parser.add_argument('--beta2', type=float, default=0.95)
 parser.add_argument('--grad_clip', type=float, default=1.0)
 parser.add_argument('--decay_lr', action='store_true')
 
+# FSDP
+parser.add_argument('--enable_fsdp', action='store_true', help='Enable Fully Sharded Data Parallel (FSDP)', default=False)
+
 # -------------------------
 # Mixture-of-Experts (MoE) arguments
 # -------------------------
@@ -120,6 +125,9 @@ parser.add_argument('--num_experts', type=int, default=0, help='number of expert
 parser.add_argument('--moe_ffn_hidden_size', type=int, default=128, help='hidden size of each expert')
 parser.add_argument('--router_topk', type=int, default=1, help='top-k experts to select')
 parser.add_argument('--moe_seq_aux_loss_coeff', type=float, default=0.0, help='coefficient for MoE aux loss')
+parser.add_argument('--moe_ffn_mup_multiplier', type=float, default=1.0, help='muP multiplier for MoE ffn hidden size')
+parser.add_argument('--moe_null_expert_bias', type=float, default=0.0, help='bias added to null expert logits')
+parser.add_argument('--moe_random_router', action='store_true', help='Use randomization in the MoE router', default=False)
 # -------------------------
 
 args = parser.parse_args()
@@ -211,8 +219,8 @@ shell_script = f"""#!/bin/bash
 #SBATCH --output={args.sbatch_logging_dir}/%j.out
 #SBATCH --error={args.sbatch_logging_dir}/%j.err
 #SBATCH --mem={args.sbatch_mem}G
-#SBATCH --partition=lowprio
-#SBATCH --qos=lowprio
+#SBATCH --partition={args.partition}
+#SBATCH --qos={args.qos}
 #SBATCH --distribution=pack
 
 {dist_args}
@@ -258,6 +266,7 @@ TRAINING_ARGS=(
     --device='{args.device}'
     --dtype='{args.dtype}'
     --compile={args.compile}
+    --enable_fsdp={args.enable_fsdp}
     --coord_check={args.coord_check}
     --normalization='{args.normalization}'
     --q_prelayer_normalization='{args.q_prelayer_normalization}'
@@ -275,6 +284,9 @@ TRAINING_ARGS=(
     --moe_ffn_hidden_size={args.moe_ffn_hidden_size}
     --router_topk={args.router_topk}
     --moe_seq_aux_loss_coeff={args.moe_seq_aux_loss_coeff}
+    --moe_ffn_mup_multiplier={args.moe_ffn_mup_multiplier}
+    --moe_null_expert_bias={args.moe_null_expert_bias}
+    --moe_random_router={args.moe_random_router}
 )
 
 srun --export=ALL,MASTER_ADDR,MASTER_PORT,WORKDIR,requirements \\
@@ -287,7 +299,10 @@ wait $SRUN_PID
 try:    
     with open(os.path.join(args.sbatch_logging_dir, f"sbatch_command.sh"), 'w') as f:
         f.write(shell_script)
-    process = subprocess.run(['sbatch'], input=shell_script, text=True, capture_output=True, check=True)
+    # Use --wait so sbatch will not return until the submitted job completes.
+    # This makes the Python submitter block, so the SLURM array task will
+    # also wait and thus the array concurrency limit controls concurrent trainings.
+    process = subprocess.run(['sbatch', '--wait'], input=shell_script, text=True, capture_output=True, check=True)
     print(f"Job submitted successfully: {process.stdout.strip()}", flush=True)
 except subprocess.CalledProcessError as e:
     print(f"Error submitting job: {e.stderr}", flush=True)

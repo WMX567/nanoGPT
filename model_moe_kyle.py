@@ -242,14 +242,15 @@ class MoE(nn.Module):
         in_dim = config.n_embd
         hidden = config.moe_ffn_hidden_size
         E = self.num_experts
+        self.config = config
 
-        self.w_gating = nn.Linear(in_dim, E, bias=True)
+        self.w_gating = nn.Linear(in_dim, E, bias=False)
         self.router_bias = nn.Parameter(torch.zeros(E))
+        self.null_expert_bias = config.moe_null_expert_bias
 
-        init_std = config.init_std
-        self.fc1_weight = nn.Parameter(torch.randn(E, in_dim, hidden) * init_std)
+        self.fc1_weight = nn.Parameter(torch.randn(E, in_dim, hidden))
         self.fc1_bias = nn.Parameter(torch.zeros(E, hidden)) if config.bias else None
-        self.fc2_weight = nn.Parameter(torch.randn(E, hidden, in_dim) * init_std)
+        self.fc2_weight = nn.Parameter(torch.randn(E, hidden, in_dim))
         self.fc2_bias = nn.Parameter(torch.zeros(E, in_dim)) if config.bias else None
 
         self.act = nn.GELU()
@@ -372,14 +373,22 @@ class MoE(nn.Module):
         E = self.num_experts
 
         logits = self.w_gating(x) + self.router_bias.view(1, 1, E)
+        print(f"Gating logits: mean {logits.mean().item():.4f}, std {logits.std().item():.4f}, min {logits.min().item():.4f}, max {logits.max().item():.4f}")
         gates = F.softmax(logits, dim=-1)  # (B, T, E)
+
+        if self.config.moe_random_router:
+            logits = torch.rand_like(logits)
+            gates = logits
 
         # Compute aux loss
         importance = gates.sum(dim=(0, 1))  # (E,)
         importance_mean = importance / (B * T)
         aux = (E * (importance_mean ** 2).sum()).to(device)
+        # aux = ((importance_mean ** 2).sum()).to(device)
 
         topk_vals, topk_idx = gates.topk(self.topk, dim=-1)  # (B,T,topk)
+        if self.config.mup:
+            topk_vals = topk_vals / topk_vals.sum(dim=-1, keepdim=True)
         sparse_gates = torch.zeros_like(gates)
         sparse_gates.scatter_(2, topk_idx, topk_vals)
         gates = sparse_gates
@@ -390,14 +399,15 @@ class MoE(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, layer_idx=None):
         super().__init__()
         self.ln_1 = normalization(config)
         self.attn = CausalSelfAttention(config)
         self.ln_2 = normalization(config)
 
         # choose ffn implementation (MLP or MoE)
-        self.use_moe = getattr(config, 'use_moe', False)
+        # first layer (layer_idx=0) is always dense MLP, rest can be MoE
+        self.use_moe = getattr(config, 'use_moe', False) and (layer_idx != 0)
         if self.use_moe:
             self.ffn = MoE(config)
         else:
@@ -438,6 +448,8 @@ class GPTConfig:
     moe_seq_aux_loss_coeff: float = 1e-4
     moe_ffn_hidden_size: int = 128
     moe_ffn_mup_multiplier: float = 1.0
+    moe_null_expert_bias: float = 0.0
+    moe_random_router: bool = False
     
 class GPT(nn.Module):
 
@@ -452,7 +464,7 @@ class GPT(nn.Module):
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
-            h = nn.ModuleList(reversed([Block(config) for _ in range(config.n_layer)])),
+            h = nn.ModuleList(reversed([Block(config, layer_idx=config.n_layer - 1 - i) for i in range(config.n_layer)])),
             ln_f = normalization(config),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
@@ -497,7 +509,8 @@ class GPT(nn.Module):
         unembedding_type = [self.lm_head.weight]
         router_type = []
         router_bias_type = []
-        moe_ffn_type = []
+        moe_ffn_type_1 = []
+        moe_ffn_type_2 = []
         layer_norms = []
 
         for block in reversed(self.transformer.h):
@@ -521,12 +534,12 @@ class GPT(nn.Module):
                         router_bias_type.append(ffn.router_bias)
                     # expert weights (stacked tensors)
                     if hasattr(ffn, 'fc1_weight'):
-                        moe_ffn_type.append(ffn.fc1_weight)
+                        moe_ffn_type_1.append(ffn.fc1_weight)
                     if hasattr(ffn, 'fc1_bias') and ffn.fc1_bias is not None:
                         print(ffn.fc1_bias)
                         raise ValueError("FC biases are not supported in MoE implementation")
                     if hasattr(ffn, 'fc2_weight'):
-                        moe_ffn_type.append(ffn.fc2_weight)
+                        moe_ffn_type_2.append(ffn.fc2_weight)
                     if hasattr(ffn, 'fc2_bias') and ffn.fc2_bias is not None:
                         print(ffn.fc2_bias)
                         raise ValueError("FC biases are not supported in MoE implementation")
@@ -544,16 +557,16 @@ class GPT(nn.Module):
                 raise ValueError(f"Biases are not supported in {self.impl['name']} implementation, found {n}")
 
         if kv:
-            return embedding_type, hidden_type, kv_type, unembedding_type, router_type, router_bias_type, moe_ffn_type
+            return embedding_type, hidden_type, kv_type, unembedding_type, router_type, router_bias_type, moe_ffn_type_1, moe_ffn_type_2
         else:
-            return embedding_type, hidden_type + kv_type, unembedding_type, router_type, router_bias_type, moe_ffn_type
+            return embedding_type, hidden_type + kv_type, unembedding_type, router_type, router_bias_type, moe_ffn_type_1, moe_ffn_type_2
         
     def _init_weights(self, module):
         if not self.config.mup:
             return
             
         n0 = self.config.n_embd / self.config.mup_multiplier
-        et, ht, kv, ut, rt, rbt, mft = self._get_weight_groups(kv=True)
+        et, ht, kv, ut, rt, rbt, mft1, mft2 = self._get_weight_groups(kv=True)
         for p in et:
             torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['embedding']['init_std'](self.config.mup_multiplier))
 
@@ -573,13 +586,16 @@ class GPT(nn.Module):
             torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['unembedding']['init_std'](self.config.mup_multiplier))
 
         for p in rt:
-            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['router']['init_std'](self.config.mup_multiplier, self.config.num_experts))
+            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['router']['init_std'](self.config.n_embd, self.config.num_experts))
 
         for p in rbt:
             torch.nn.init.zeros_(p)
 
-        for p in mft:
-            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['moe_ffn']['init_std'](self.config.mup_multiplier, self.config.moe_ffn_mup_multiplier))
+        for p in mft1:
+            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['moe_ffn_1']['init_std'](self.config.n_embd, self.config.moe_ffn_hidden_size))
+        
+        for p in mft2:
+            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['moe_ffn_2']['init_std'](self.config.n_embd, self.config.moe_ffn_hidden_size))
 
     def forward(self, idx, targets=None):
         device = idx.device
@@ -700,7 +716,7 @@ class GPT(nn.Module):
         extra_args = dict(fused=True) if use_fused else dict()
 
         optim_groups = []
-        embedding_type, hidden_type, kv_type, unembedding_type, router_type, router_bias_type, moe_ffn_type = self._get_weight_groups(kv=True)
+        embedding_type, hidden_type, kv_type, unembedding_type, router_type, router_bias_type, moe_ffn_type1, moe_ffn_type2 = self._get_weight_groups(kv=True)
 
         et_group = {}
         et_group['params'] = embedding_type
@@ -734,26 +750,76 @@ class GPT(nn.Module):
         rt_group = {}
         if len(router_type) > 0:
             rt_group['params'] = router_type
-            router_group_dict = self.impl['router'] if 'router' in self.impl else self.impl['hidden']
-            rt_group['lr_scale'] = router_group_dict['lr_scale'](self.config.mup_multiplier, self.config.num_experts)
-            rt_group['wd_scale'] = router_group_dict['wd_scale'](self.config.mup_multiplier, self.config.num_experts)
+            if 'router' in self.impl:
+                router_group_dict = self.impl['router']
+                rt_group['lr_scale'] = router_group_dict['lr_scale'](self.config.n_embd, self.config.num_experts)
+                rt_group['wd_scale'] = router_group_dict['wd_scale'](self.config.n_embd, self.config.num_experts)
+            else:
+                router_group_dict = self.impl['hidden']
+                rt_group['lr_scale'] = router_group_dict['lr_scale'](self.config.mup_multiplier)
+                rt_group['wd_scale'] = router_group_dict['wd_scale'](self.config.mup_multiplier)
             optim_groups.append(rt_group)
 
         rbt_group = {}
         if len(router_bias_type) > 0:
             rbt_group['params'] = router_bias_type
-            router_bias_group_dict = self.impl['router_bias'] if 'router_bias' in self.impl else self.impl['hidden']
-            rbt_group['lr_scale'] = router_bias_group_dict['lr_scale'](self.config.mup_multiplier, self.config.num_experts)
-            rbt_group['wd_scale'] = router_bias_group_dict['wd_scale'](self.config.mup_multiplier, self.config.num_experts)
+            if 'router' in self.impl:
+                router_bias_group_dict = self.impl['router_bias']
+                rbt_group['lr_scale'] = router_bias_group_dict['lr_scale'](self.config.mup_multiplier, self.config.num_experts)
+                rbt_group['wd_scale'] = router_bias_group_dict['wd_scale'](self.config.mup_multiplier, self.config.num_experts) 
+            else:
+                router_bias_group_dict = self.impl['hidden']    
+                rbt_group['lr_scale'] = router_bias_group_dict['lr_scale'](self.config.mup_multiplier)
+                rbt_group['wd_scale'] = router_bias_group_dict['wd_scale'](self.config.mup_multiplier)
             optim_groups.append(rbt_group)
 
-        mft_group = {}
-        if len(moe_ffn_type) > 0:
-            mft_group['params'] = moe_ffn_type
-            moe_ffn_group_dict = self.impl['moe_ffn'] if 'moe_ffn' in self.impl else self.impl['hidden']
-            mft_group['lr_scale'] = moe_ffn_group_dict['lr_scale'](self.config.mup_multiplier, self.config.moe_ffn_mup_multiplier)
-            mft_group['wd_scale'] = moe_ffn_group_dict['wd_scale'](self.config.mup_multiplier, self.config.moe_ffn_mup_multiplier)
-            optim_groups.append(mft_group)
+        mft_group_1 = {}
+        if len(moe_ffn_type1) > 0:
+            mft_group_1['params'] = moe_ffn_type1
+            if 'moe_ffn_1' in self.impl:
+                print("using moe_ffn_1 param impl")
+                moe_ffn_group_dict = self.impl['moe_ffn_1']
+                mft_group_1['lr_scale'] = moe_ffn_group_dict['lr_scale'](
+                    self.config.mup_multiplier, 
+                    self.config.moe_ffn_mup_multiplier,
+                    self.config.num_experts,
+                    self.config.router_topk
+                )
+                mft_group_1['wd_scale'] = moe_ffn_group_dict['wd_scale'](
+                    self.config.mup_multiplier, 
+                    self.config.moe_ffn_mup_multiplier,
+                    self.config.num_experts,
+                    self.config.router_topk
+                )
+            else:
+                moe_ffn_group_dict = self.impl['hidden']
+                mft_group_1['lr_scale'] = moe_ffn_group_dict['lr_scale'](self.config.mup_multiplier)
+                mft_group_1['wd_scale'] = moe_ffn_group_dict['wd_scale'](self.config.mup_multiplier)
+            optim_groups.append(mft_group_1)
+
+        mft_group_2 = {}
+        if len(moe_ffn_type2) > 0:
+            mft_group_2['params'] = moe_ffn_type2
+            if 'moe_ffn_2' in self.impl:
+                print(f"Using separate moe_ffn_2 param group with impl {self.impl['name']}")
+                moe_ffn_group_dict = self.impl['moe_ffn_2']
+                mft_group_2['lr_scale'] = moe_ffn_group_dict['lr_scale'](
+                    self.config.mup_multiplier, 
+                    self.config.moe_ffn_mup_multiplier,
+                    self.config.num_experts,
+                    self.config.router_topk
+                )
+                mft_group_2['wd_scale'] = moe_ffn_group_dict['wd_scale'](
+                    self.config.mup_multiplier, 
+                    self.config.moe_ffn_mup_multiplier,
+                    self.config.num_experts,
+                    self.config.router_topk
+                )
+            else:
+                moe_ffn_group_dict = self.impl['hidden']
+                mft_group_2['lr_scale'] = moe_ffn_group_dict['lr_scale'](self.config.mup_multiplier)
+                mft_group_2['wd_scale'] = moe_ffn_group_dict['wd_scale'](self.config.mup_multiplier)
+            optim_groups.append(mft_group_2)
 
         layer_norms = [p for n, p in self.named_parameters() if 'ln_' in n]
         layer_norms_group = {
@@ -852,9 +918,4 @@ class GPT(nn.Module):
                 logits[logits < v[:, [-1]]] = -float('Inf')
             # apply softmax to convert logits to (normalized) probabilities
             probs = F.softmax(logits, dim=-1)
-            # sample from the distribution
-            idx_next = torch.multinomial(probs, num_samples=1)
-            # append sampled index to the running sequence and continue
-            idx = torch.cat((idx, idx_next), dim=1)
-
-        return idx
+            # sample from 

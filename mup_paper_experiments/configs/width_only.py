@@ -19,21 +19,21 @@ learning_rates = [
     # 10**p for p in np.linspace(-4.25, -2.5, LEARNING_RATE_SAMPLES)
     10**p for p in np.linspace(-4.0, -2.0, LEARNING_RATE_SAMPLES)
 ]
-seeds = [42, 43, 44, 45, 46]
+seeds = [42, 43]
 
 WANDB_PROJECT = 'width-only-ablation-lr-decay-coarse-wd'
 
 model_configs = [
-    # {'n_embd': 256,  'n_head': 4,   'n_kv_head': 4,   'n_layer': MODEL_DEPTH, 'weight_decay': 0.0, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 2, 'gradient_accumulation_steps': 2, 'batch_size': 50, 'max_iters': 981 if PROD else 30},
-    # {'n_embd': 320,  'n_head': 5,   'n_kv_head': 5,   'n_layer': MODEL_DEPTH, 'weight_decay': 0.0, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 2, 'gradient_accumulation_steps': 2, 'batch_size': 58, 'max_iters': 1139 if PROD else 30},
-    # {'n_embd': 384,  'n_head': 6,   'n_kv_head': 6,   'n_layer': MODEL_DEPTH, 'weight_decay': 0.0, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 2, 'gradient_accumulation_steps': 2, 'batch_size': 66, 'max_iters': 1295 if PROD else 30},
-    # {'n_embd': 448,  'n_head': 7,   'n_kv_head': 7,   'n_layer': MODEL_DEPTH, 'weight_decay': 0.0, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 3, 'gradient_accumulation_steps': 3, 'batch_size': 49, 'max_iters': 1447 if PROD else 30},
-    # {'n_embd': 512,  'n_head': 8,   'n_kv_head': 8,   'n_layer': MODEL_DEPTH, 'weight_decay': 0.0, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 3, 'gradient_accumulation_steps': 3, 'batch_size': 54, 'max_iters': 1597 if PROD else 30},
+    {'n_embd': 256,  'n_head': 4,   'n_kv_head': 4,   'n_layer': MODEL_DEPTH, 'weight_decay': WEIGHT_DECAY, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 2, 'gradient_accumulation_steps': 2, 'batch_size': 50, 'max_iters': 981 if PROD else 30},
+    {'n_embd': 320,  'n_head': 5,   'n_kv_head': 5,   'n_layer': MODEL_DEPTH, 'weight_decay': WEIGHT_DECAY, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 2, 'gradient_accumulation_steps': 2, 'batch_size': 58, 'max_iters': 1139 if PROD else 30},
+    {'n_embd': 384,  'n_head': 6,   'n_kv_head': 6,   'n_layer': MODEL_DEPTH, 'weight_decay': WEIGHT_DECAY, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 2, 'gradient_accumulation_steps': 2, 'batch_size': 66, 'max_iters': 1295 if PROD else 30},
+    {'n_embd': 448,  'n_head': 7,   'n_kv_head': 7,   'n_layer': MODEL_DEPTH, 'weight_decay': WEIGHT_DECAY, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 3, 'gradient_accumulation_steps': 3, 'batch_size': 49, 'max_iters': 1447 if PROD else 30},
+    {'n_embd': 512,  'n_head': 8,   'n_kv_head': 8,   'n_layer': MODEL_DEPTH, 'weight_decay': WEIGHT_DECAY, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 3, 'gradient_accumulation_steps': 3, 'batch_size': 54, 'max_iters': 1597 if PROD else 30},
     # {'n_embd': 768,  'n_head': 12,  'n_kv_head': 12,  'n_layer': MODEL_DEPTH, 'weight_decay': 0.0, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 4, 'gradient_accumulation_steps': 4, 'batch_size': 56, 'max_iters': 2184 if PROD else 30},
     # {'n_embd': 1024, 'n_head': 16,  'n_kv_head': 16,  'n_layer': MODEL_DEPTH, 'weight_decay': 0.0, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 5, 'gradient_accumulation_steps': 5, 'batch_size': 56, 'max_iters': 2760 if PROD else 30},
     # {'n_embd': 1280, 'n_head': 20,  'n_kv_head': 20,  'n_layer': MODEL_DEPTH, 'weight_decay': 0.0, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 5, 'gradient_accumulation_steps': 5, 'batch_size': 68, 'max_iters': 3331 if PROD else 30},
     # {'n_embd': 1536, 'n_head': 24,  'n_kv_head': 24,  'n_layer': MODEL_DEPTH, 'weight_decay': 0.0, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 6, 'gradient_accumulation_steps': 6, 'batch_size': 66, 'max_iters': 3900 if PROD else 30},
-    {'n_embd': 2048, 'n_head': 32,  'n_kv_head': 32,  'n_layer': MODEL_DEPTH, 'weight_decay': 0.0, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 8, 'gradient_accumulation_steps': 8, 'batch_size': 64, 'max_iters': 5032 if PROD else 30, 'sbatch_mem': 256},
+    # {'n_embd': 2048, 'n_head': 32,  'n_kv_head': 32,  'n_layer': MODEL_DEPTH, 'weight_decay': 0.0, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 8, 'gradient_accumulation_steps': 8, 'batch_size': 64, 'max_iters': 5032 if PROD else 30, 'sbatch_mem': 256},
 ]
 
 configs = []
@@ -51,6 +51,7 @@ for mup in [True, False]:
                 conf['min_lr'] = lr / 10
                 conf['decay_profile'] = 'cosine'
                 conf['decay_lr'] = 'true'
+                conf['dataset'] = 'openwebtext'
 
                 if mup:
                     conf['mup'] = 'true'

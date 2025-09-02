@@ -27,6 +27,7 @@ import torch
 from contextlib import nullcontext
 from megatron.core.datasets.indexed_dataset import _IndexReader, IndexedDataset
 from torch.distributed import destroy_process_group, init_process_group
+from torch.distributed.fsdp import fully_shard, FSDPModule
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 # from model import GPTConfig, GPT
@@ -91,7 +92,6 @@ backend = 'nccl' # 'nccl', 'gloo', etc.
 device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 # dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 dtype = 'float32'
-compile = True # use PyTorch 2.0 to compile the model to be faster
 mup = True
 mup_multiplier = 1.0
 # impl = tpv_left_impl
@@ -112,35 +112,25 @@ anneal_wd = False
 min_wd = 0.0 # minimum weight decay for annealing
 wd_warmup_iters = 1000
 wd_anneal_iters = 1000
-use_moe: bool = False
-# -------- MoE-related knobs (1,3,4,5,6,7) ----------
+# -------- MoE-related knobs ----------
 use_moe: bool = False
 num_experts: int = 0
 router_topk: int = 8
 moe_ffn_hidden_size: int = 128
 moe_seq_aux_loss_coeff: float = 1e-4
-
-# moe_ffn_hidden_size: int = 128                       # per-expert hidden
-# moe_shared_expert_intermediate_size: int = 128       # shared branch hidden
-# moe_router_score_function: str = 'sigmoid'           # (3)
-# moe_router_pre_softmax: bool = True                  # (3)
-# moe_router_topk: int = 1                             # (3)
-# moe_router_bias_update_rate: float = 0.0             # (3) set >0 to enable bias nudging
-# moe_router_enable_expert_bias: bool = False          # (3)
-# moe_router_topk_saling_dummy: float = 1.0            # kept for compatibility; not used
-# moe_router_topk_scaling_factor: float = 1.0          # (3)
-# moe_router_dtype: str = 'fp32'                       # 'fp32' or 'fp64' (3)
-# moe_router_ema_alpha: float = 0.1                    # (3) smoothing for usage EMA
-# moe_token_dispatcher_type: str = 'alltoall'          # (4) simulated single-GPU
-# moe_capacity_factor: float = 1.25                    # (5)
-# moe_router_load_balancing_type: str = 'seq_aux_loss' # (6)
-# moe_aux_loss_coeff: float = 0.0                      # (6) set >0 to enable
-# moe_debug: bool = False                               # enable verbose MoE debug prints
+moe_ffn_mup_multiplier: float = 1.0
+moe_null_expert_bias: float = 0.0
+moe_random_router: bool = False
+# -------- FSDP ----------
+enable_fsdp = False
+compile = True # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open('configurator.py').read()) # overrides from command line or config file
 config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
+
+assert not (enable_fsdp and compile), "FSDP and PyTorch 2.0 compilation are mutually exclusive, please disable one of them."
 
 os.makedirs(out_dir, exist_ok=True)
 seed_everything(seed)
@@ -321,6 +311,9 @@ model_args = dict(
     moe_ffn_hidden_size=moe_ffn_hidden_size,
     router_topk=router_topk,
     moe_seq_aux_loss_coeff=moe_seq_aux_loss_coeff,
+    moe_ffn_mup_multiplier=moe_ffn_mup_multiplier,
+    moe_null_expert_bias=moe_null_expert_bias,
+    moe_random_router=moe_random_router,
 )
 
 if init_from == 'scratch':
@@ -412,15 +405,6 @@ model.to(device)
 # initialize a GradScaler. If enabled=False scaler is a no-op
 scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
 
-# optimizer
-optimizer = model.configure_optimizers(
-    weight_decay, learning_rate, (beta1, beta2), eps, device_type,
-    adaptive_optimizer=adaptive_optimizer,
-)
-if init_from == 'resume':
-    optimizer.load_state_dict(checkpoint['optimizer'])
-checkpoint = None # free up memory
-
 # compile the model
 if compile:
     print("compiling the model... (takes a ~minute)")
@@ -432,7 +416,30 @@ if ddp:
     # MoE can leave some expert parameters unused on a given forward pass which
     # breaks the default DDP reduction. Enable find_unused_parameters so DDP
     # tolerates parameters that do not participate in every forward.
-    model = DDP(model, device_ids=[ddp_local_rank], find_unused_parameters=False)
+    if enable_fsdp: 
+        for layer in model.transformer.h:
+            try:
+                fully_shard(layer)
+            except Exception as e:
+                print(f"Failed to fully shard layer {layer}: {e}")
+        fully_shard(model)
+        assert isinstance(model, FSDPModule)
+    else:
+        model = DDP(model, device_ids=[ddp_local_rank], find_unused_parameters=False)
+
+# optimizer
+if ddp and not enable_fsdp:
+    raw_model = model.module # unwrap DDP
+else:
+    raw_model = model
+
+optimizer = raw_model.configure_optimizers(
+    weight_decay, learning_rate, (beta1, beta2), eps, device_type,
+    adaptive_optimizer=adaptive_optimizer,
+)
+if init_from == 'resume':
+    optimizer.load_state_dict(checkpoint['optimizer'])
+checkpoint = None # free up memory
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
@@ -530,9 +537,10 @@ tiwd = 0 # total integrated weight decay
 tilr = 0 # total integrated learning rate
 # training loop
 X, Y = get_batch('train') # fetch the very first batch
+global_time = time.time()
 t0 = time.time()
 local_iter_num = 0 # number of iterations in the lifetime of this process
-raw_model = model.module if ddp else model # unwrap DDP container if needed
+raw_model = model.module if ddp and not enable_fsdp else model # unwrap DDP container if needed
 running_mfu = -1.0
 while True:
 
@@ -546,34 +554,43 @@ while True:
         param_group['weight_decay'] = wd * param_group.get('wd_scale', 1.0)
 
     # evaluate the loss on train/val sets and write checkpoints
-    if iter_num % eval_interval == 0 and master_process:
+    if iter_num % eval_interval == 0:
         losses = estimate_loss()
         print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-        if wandb_log:
-            wandb.log({
-                "iter": iter_num,
-                "train/loss": losses['train'],
-                "val/loss": losses['val'],
-                "lr": lr,
-                "wd": wd,
-                "tiwd": tiwd,
-                "tilr": tilr,
-                "base_lr": learning_rate,
-                "mfu": running_mfu*100, # convert to percentage
-            })
-        if losses['val'] < best_val_loss or always_save_checkpoint:
-            best_val_loss = losses['val']
-            if iter_num > 0:
-                checkpoint = {
-                    'model': raw_model.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'model_args': model_args,
-                    'iter_num': iter_num,
-                    'best_val_loss': best_val_loss,
-                    'config': config,
-                }
-                print(f"saving checkpoint to {out_dir}")
-                # torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+        if master_process:
+            if wandb_log:
+                wandb.log({
+                    "iter": iter_num,
+                    "train/loss": losses['train'],
+                    "val/loss": losses['val'],
+                    "lr": lr,
+                    "wd": wd,
+                    "tiwd": tiwd,
+                    "tilr": tilr,
+                    "base_lr": learning_rate,
+                    "mfu": running_mfu*100, # convert to percentage
+                })
+        # TODO: I've disabled checkpointing for the moment.
+        # if losses['val'] < best_val_loss or always_save_checkpoint:
+        #     best_val_loss = losses['val']
+        #     if iter_num > 0:
+        #         checkpoint = {
+        #             'model': raw_model.state_dict(),
+        #             'optimizer': optimizer.state_dict(),
+        #             'model_args': model_args,
+        #             'iter_num': iter_num,
+        #             'best_val_loss': best_val_loss,
+        #             'config': config,
+        #         }
+        #         if master_process:
+        #             print(f"saving checkpoint to {out_dir}")
+        #             torch.save(checkpoint, os.path.join(out_dir, f'ckpt_{ckpt_num}.pt'))
+        #             print(f"saved checkpoint to {out_dir}/ckpt_{ckpt_num}.pt")
+        #             ckpt_num += 1
+
+        # # sync all ranks after checkpoint logic
+        # if ddp:
+        #     torch.distributed.barrier()
     if iter_num == 0 and eval_only:
         break
 
@@ -596,7 +613,8 @@ while True:
             if use_moe:
                 logits, loss, moe_aux = model(X, Y)
                 # detach and accumulate the raw aux (sum over micro-steps). Do not .item() here
-                moe_aux_accum = moe_aux_accum + moe_aux.detach().to(device)
+                # moe_aux_accum = moe_aux_accum + moe_aux.detach().to(device)
+                moe_aux = moe_aux.detach() / gradient_accumulation_steps
             else:
                 logits, loss = model(X, Y)
             loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
@@ -604,9 +622,6 @@ while True:
         X, Y = get_batch('train')
         # backward pass, with gradient scaling if training in fp16
         scaler.scale(loss).backward()
-    # after micro-steps: final MoE aux for this iteration is the accumulated sum over micro-steps
-    if use_moe:
-        moe_aux = moe_aux_accum
 
     # clip the gradient
     if grad_clip != 0.0:
@@ -636,12 +651,16 @@ while True:
         avg_loss[avg_idx] = lossf
         avg_idx = (avg_idx + 1) % avg_interval
 
-        if wandb_log and master_process:
+        if wandb_log:
             # Iterate through all the weights and get the F norm of them
             layer_norm_data = {}
-            for name, param in model.named_parameters():
-                if param.grad is not None:
-                    layer_norm_data[f"norm/{name}"] = param.grad.norm().item()
+            if not enable_fsdp:
+                # TODO: Does this break things when we use FSDP?
+                # I.e. no longer iterate through named params?
+                for name, param in model.named_parameters():
+                    if param.grad is not None:
+                        layer_norm_data[f"grad_norm/{name}"] = param.grad.norm().item()
+                        layer_norm_data[f"norm/{name}"] = param.norm().item()
 
             moe_data = {}
             if use_moe:
@@ -649,10 +668,19 @@ while True:
                     "moe_aux_loss": moe_auxf,
                 }
 
+            perf_data = {}
+            if local_iter_num >= 4: # let the training loop settle a bit
+                tokens_per_iter = gradient_accumulation_steps * batch_size * block_size
+                perf_data = {
+                    "perf/throughput": tokens_per_iter / dt if dt > 0 else 0,
+                    "perf/mfu": running_mfu * 100, # convert to percentage
+                    "perf/iters_per_sec": 1 / dt if dt > 0 else 0,
+                    "perf/average_iters_per_sec": iter_num / (time.time() - global_time) if iter_num > 0 else 0,
+                }
+
             wandb.log({
                 "iter": iter_num,
                 "train/loss": lossf,
-                "mfu": running_mfu * 100, # convert to percentage
                 "lr": lr,
                 "tiwd": tiwd,
                 "tilr": tilr,
@@ -660,6 +688,7 @@ while True:
                 "train/avg_loss": sum(avg_loss) / len(avg_loss),
                 **layer_norm_data,
                 **moe_data,
+                **perf_data,
                 # "abs_grad_norm": abs_grad_norm,
             })
 

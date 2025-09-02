@@ -19,7 +19,7 @@ for seed in {0..10}; do
         n_heads=$(( emb / head_size ))
 
         echo "mup_muliplier: ${mup_multiplier}, n_heads: ${n_heads}, emb: ${emb}, seed: ${seed}"
-        srun python train.py \
+        srun python slimpj_train.py \
             --out_dir=${out_dir} \
             --eval_interval=10000000 \
             --log_interval=10000000 \
@@ -50,6 +50,7 @@ for seed in {0..10}; do
             --backend='nccl' \
             --device='cuda' \
             --dtype='float32' \
-            --compile=False
+            --compile=False \
+            --impl='xllm
     done
 done

@@ -33,7 +33,7 @@ for arg in sys.argv[1:]:
         key = key[2:]
         if key in globals():
             try:
-                if type(globals()[key]) == int or type(globals()[key]) == float:
+                if type(globals()[key]) == int or type(globals()[key]) == float or type(globals()[key]) == str:
                     # if the value is a number, we can just use it as is
                     attempt = type(globals()[key])(val)
                 else:
@@ -41,7 +41,7 @@ for arg in sys.argv[1:]:
                     attempt = literal_eval(val)
             except (SyntaxError, ValueError):
                 # if that goes wrong, just use the string
-                attempt = val
+                attempt = str(val)
             # ensure the types match ok
             assert type(attempt) == type(globals()[key]), f"Type mismatch for {key}: {type(attempt)} != {type(globals()[key])}. " \
                   f"Please ensure you are passing the correct type for {key}. Key value is: {attempt}"
