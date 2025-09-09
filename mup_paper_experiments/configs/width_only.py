@@ -9,7 +9,15 @@
 import numpy as np
 from copy import deepcopy
 
-PROD = True
+import numpy as np
+from copy import deepcopy 
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--dry-run', action='store_true', help='Enable dry run mode')
+args = parser.parse_args()
+
+PROD = not args.dry_run
 
 WEIGHT_DECAY = 0.1
 MODEL_DEPTH = 8
@@ -19,9 +27,9 @@ learning_rates = [
     # 10**p for p in np.linspace(-4.25, -2.5, LEARNING_RATE_SAMPLES)
     10**p for p in np.linspace(-4.0, -2.0, LEARNING_RATE_SAMPLES)
 ]
-seeds = [42, 43]
+seeds = [42, 43] if PROD else [42]
 
-WANDB_PROJECT = 'width-only-ablation-lr-decay-coarse-wd'
+WANDB_PROJECT = f'width-only-ablation-lr-decay-coarse-wd-prod={PROD}'
 
 model_configs = [
     {'n_embd': 256,  'n_head': 4,   'n_kv_head': 4,   'n_layer': MODEL_DEPTH, 'weight_decay': WEIGHT_DECAY, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 2, 'gradient_accumulation_steps': 2, 'batch_size': 50, 'max_iters': 981 if PROD else 30},
