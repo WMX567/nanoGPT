@@ -3,6 +3,12 @@
 # python crawl_wandb.py --project moe-ablate-granularity-2 --entity krchickering-uc-davis --output-dir /mnt/weka/home/kyle.chickering/code/nanoGPT/mup_paper_experiments/results/moe_ablations/moe-ablate-granularity-2
 # python crawl_wandb.py --project moe-ablate-granularity-3 --entity krchickering-uc-davis --output-dir /mnt/weka/home/kyle.chickering/code/nanoGPT/mup_paper_experiments/results/moe_ablations/moe-ablate-granularity-3
 # python crawl_wandb.py --project moe-ablate-granularity-4 --entity krchickering-uc-davis --output-dir /mnt/weka/home/kyle.chickering/code/nanoGPT/mup_paper_experiments/results/moe_ablations/moe-ablate-granularity-4
+# python crawl_wandb.py --project moe-ablate-granularity-new-scaling --entity krchickering-uc-davis --output-dir /mnt/weka/home/kyle.chickering/code/nanoGPT/mup_paper_experiments/results/moe_ablations/moe-ablate-granularity-new-scaling
+# python crawl_wandb.py --project moe-ablate-granularity-new-scaling-less-aux-more-lr --entity krchickering-uc-davis --output-dir /mnt/weka/home/kyle.chickering/code/nanoGPT/mup_paper_experiments/results/moe_ablations/moe-ablate-granularity-new-scaling-less-aux-more-lr
+# python crawl_wandb.py --project moe-ablate-granularity-new-scaling-more-lr --entity krchickering-uc-davis --output-dir /mnt/weka/home/kyle.chickering/code/nanoGPT/mup_paper_experiments/results/moe_ablations/moe-ablate-granularity-new-scaling-more-lr
+# python crawl_wandb.py --project moe-ablate-granularity-new-scaling-more-lr-2 --entity krchickering-uc-davis --output-dir /mnt/weka/home/kyle.chickering/code/nanoGPT/mup_paper_experiments/results/moe_ablations/moe-ablate-granularity-new-scaling-more-lr-2
+# python crawl_wandb.py --project moe-ablate-granularity-new-scaling-more-lr-5 --entity krchickering-uc-davis --output-dir /mnt/weka/home/kyle.chickering/code/nanoGPT/mup_paper_experiments/results/moe_ablations/moe-ablate-granularity-new-scaling-more-lr-5
+# python crawl_wandb.py --project moe-ablate-granularity-new-scaling-more-lr-6 --entity krchickering-uc-davis --output-dir /mnt/weka/home/kyle.chickering/code/nanoGPT/mup_paper_experiments/results/moe_ablations/moe-ablate-granularity-new-scaling-more-lr-6
 
 import numpy as np
 from copy import deepcopy 
@@ -11,7 +17,7 @@ PROD = True
 NO_PROD_ITERS = 100
 
 WEIGHT_DECAY = 0.05
-WANDB_PROJECT = 'moe-ablate-granularity-4'
+WANDB_PROJECT = 'moe-ablate-granularity-new-scaling-more-lr-6'
 
 HIDDEN_DIM_BASE = 256
 FFN_HIDDEN_DIM_BASE = 128
@@ -27,6 +33,7 @@ shared_params = {
     'decay_lr': 'true',
     'weight_decay': WEIGHT_DECAY,
     'avg_interval': 120,
+    'moe_null_expert_bias': 0.0,
     'sbatch_mem': 512,
     'dataset': 'openwebtext',
     'use_moe': True,
@@ -41,8 +48,8 @@ shared_params = {
     'n_layer': 3,
     'num_experts': 32,
     'sbatch_timeout': '02:00:00' if PROD else '00:05:00',   
-    'partition': 'main',
-    'qos': 'k2m'
+    'partition': 'lowprio',
+    'qos': 'lowprio',
 }
 
 model_configs = [
@@ -88,17 +95,18 @@ model_configs = [
     },
 ]
 
-LEARNING_RATE_SAMPLES = 11
+LEARNING_RATE_SAMPLES = 13
 learning_rates = [
-    10**p for p in np.linspace(-3.5, -2, LEARNING_RATE_SAMPLES)
+    10**p for p in np.linspace(-3.5, -2.0, LEARNING_RATE_SAMPLES)
 ] if PROD else [0.002512]
-seeds = [42, 43, 44] if PROD else [42]
+# seeds = [42, 43, 44] if PROD else [42]
+seeds = [45, 46]
 
 configs = []
 for seed in seeds:
     for conf in model_configs:
         for lr in learning_rates:
-            for mup in [True, False]:
+            for mup in [True]: #, False]:
                 conf = deepcopy(conf)
                 conf.update(shared_params)
 

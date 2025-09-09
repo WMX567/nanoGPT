@@ -180,10 +180,7 @@ ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=
 
 # poor man's data loader
 if dataset != 'slim_pajama':
-    if dataset == 'openwebtext':
-        data_dir = '/mnt/weka/home/kyle.chickering/code/nanoGPT-fsdp/data/openwebtext'
-    else:
-        data_dir = os.path.join('data', dataset)
+    data_dir = os.path.join('data', dataset)
     def get_batch(split):
         # We recreate np.memmap every batch to avoid a memory leak, as per
         # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
@@ -452,7 +449,7 @@ def estimate_loss():
             X, Y = get_batch(split)
             with ctx:
                 if use_moe:
-                    logits, loss, _ = model(X, Y)
+                    logits, loss, _, _ = model(X, Y)
                 else:
                     logits, loss = model(X, Y)
             losses[k] = loss.item()
@@ -611,10 +608,11 @@ while True:
             model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
         with ctx:
             if use_moe:
-                logits, loss, moe_aux = model(X, Y)
+                logits, loss, moe_aux, lm_loss = model(X, Y)
                 # detach and accumulate the raw aux (sum over micro-steps). Do not .item() here
                 # moe_aux_accum = moe_aux_accum + moe_aux.detach().to(device)
                 moe_aux = moe_aux.detach() / gradient_accumulation_steps
+                lm_loss = lm_loss.detach() / gradient_accumulation_steps
             else:
                 logits, loss = model(X, Y)
             loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
@@ -643,6 +641,7 @@ while True:
         lossf = loss.item() * gradient_accumulation_steps
         if use_moe:
             moe_auxf = moe_aux * gradient_accumulation_steps
+            lm_lossf = lm_loss * gradient_accumulation_steps
         if local_iter_num >= 5: # let the training loop settle a bit
             mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt)
             running_mfu = mfu if running_mfu == -1.0 else 0.9*running_mfu + 0.1*mfu
@@ -666,6 +665,7 @@ while True:
             if use_moe:
                 moe_data = {
                     "moe_aux_loss": moe_auxf,
+                    "train/lm_loss": lm_lossf,
                 }
 
             perf_data = {}

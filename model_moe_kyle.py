@@ -301,6 +301,7 @@ class MoE(nn.Module):
 
         # Batched matmul: (U, max_count, C) x (U, C, H) -> (U, max_count, H)
         h_grouped = torch.bmm(x_grouped, weight1_u)
+        h_grouped *= self.config.impl['moe_ffn_1']['output_multiplier'](self.config.mup_multiplier, self.config.moe_ffn_mup_multiplier, self.config.num_experts, self.topk)
         if self.fc1_bias is not None:
             h_grouped.add_(bias1_u.unsqueeze(1))  # (U, max_count, H)
 
@@ -344,6 +345,7 @@ class MoE(nn.Module):
 
         # Batched matmul: (U, max_count, H) x (U, H, C) -> (U, max_count, C)
         out_grouped = torch.bmm(h_grouped2, weight2_u)
+        out_grouped *= self.config.impl['moe_ffn_2']['output_multiplier'](self.config.mup_multiplier, self.config.moe_ffn_mup_multiplier, self.config.num_experts, self.topk)
         if self.fc2_bias is not None:
             out_grouped.add_(bias2_u.unsqueeze(1))  # (U, max_count, C)
 
@@ -376,19 +378,22 @@ class MoE(nn.Module):
         print(f"Gating logits: mean {logits.mean().item():.4f}, std {logits.std().item():.4f}, min {logits.min().item():.4f}, max {logits.max().item():.4f}")
         gates = F.softmax(logits, dim=-1)  # (B, T, E)
 
+        # Compute aux loss
+        importance = gates.sum(dim=(0, 1))  # (E,)
+        importance_mean = importance / (B * T)
+        if self.config.mup:
+            aux = (E**2 * (importance_mean ** 2).sum()).to(device)
+        else:
+            aux = (E * (importance_mean ** 2).sum()).to(device)
+        # aux = ((importance_mean ** 2).sum()).to(device)
+
         if self.config.moe_random_router:
             logits = torch.rand_like(logits)
             gates = logits
 
-        # Compute aux loss
-        importance = gates.sum(dim=(0, 1))  # (E,)
-        importance_mean = importance / (B * T)
-        aux = (E * (importance_mean ** 2).sum()).to(device)
-        # aux = ((importance_mean ** 2).sum()).to(device)
-
         topk_vals, topk_idx = gates.topk(self.topk, dim=-1)  # (B,T,topk)
         if self.config.mup:
-            topk_vals = topk_vals / topk_vals.sum(dim=-1, keepdim=True)
+            topk_vals = topk_vals / (topk_vals.sum(dim=-1, keepdim=True) + self.null_expert_bias)
         sparse_gates = torch.zeros_like(gates)
         sparse_gates.scatter_(2, topk_idx, topk_vals)
         gates = sparse_gates
@@ -592,10 +597,10 @@ class GPT(nn.Module):
             torch.nn.init.zeros_(p)
 
         for p in mft1:
-            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['moe_ffn_1']['init_std'](self.config.n_embd, self.config.moe_ffn_hidden_size))
+            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['moe_ffn_1']['init_std'](self.config.n_embd, self.config.moe_ffn_hidden_size, self.config.num_experts, self.config.router_topk))
         
         for p in mft2:
-            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['moe_ffn_2']['init_std'](self.config.n_embd, self.config.moe_ffn_hidden_size))
+            torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['moe_ffn_2']['init_std'](self.config.n_embd, self.config.moe_ffn_hidden_size, self.config.num_experts, self.config.router_topk))
 
     def forward(self, idx, targets=None):
         device = idx.device
@@ -639,7 +644,7 @@ class GPT(nn.Module):
             loss = None
 
         if self.config.use_moe:
-            return logits, loss, moe_aux
+            return logits, loss, moe_aux, lm_loss
         return logits, loss
 
     def crop_block_size(self, block_size):
@@ -838,6 +843,7 @@ class GPT(nn.Module):
         else:
             optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, eps=eps, weight_decay=weight_decay, **extra_args)
             print(f"using fused AdamW: {use_fused}")
+            # optimizer = torch.optim.SGD(optim_groups, lr=learning_rate, weight_decay=weight_decay, momentum=0.9, nesterov=True)
 
         for group in optimizer.param_groups:
             group['weight_decay'] = group['wd_scale'] * group['weight_decay'] * weight_decay

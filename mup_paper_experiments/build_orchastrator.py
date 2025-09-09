@@ -9,6 +9,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument('--config_generator_file', type=str, required=True)
 parser.add_argument('--max_concurrent', type=int, default=30)
+parser.add_argument('--dry-run', action='store_true', help='Enable dry run mode')
 
 args = parser.parse_args()
 
@@ -24,9 +25,10 @@ os.makedirs(orchastrator_dir, exist_ok=True)
 # run the config to get configs as a string
 def run_config_generator(config_generator_file):
     """Run the config generator script and return its output."""
+    dry_run_flag = "--dry-run" if args.dry_run else ""
     try:
         result = subprocess.run(
-            ['python', config_generator_file],
+            ['python', config_generator_file, dry_run_flag],
             capture_output=True,
             text=True,
             check=True

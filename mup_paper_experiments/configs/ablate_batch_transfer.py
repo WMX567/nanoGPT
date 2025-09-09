@@ -3,8 +3,13 @@
 
 import numpy as np
 from copy import deepcopy 
+import argparse
 
-PROD = True
+parser = argparse.ArgumentParser()
+parser.add_argument('--dry-run', action='store_true', help='Enable dry run mode')
+args = parser.parse_args()
+
+PROD = not args.dry_run
 
 WANDB_PROJECT = 'ablate-transfer-on-batches'
 

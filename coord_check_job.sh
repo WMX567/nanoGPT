@@ -1,4 +1,5 @@
 #!/bin/bash
+#SBATCH --account=research
 #SBATCH --time=0:30:00
 #SBATCH --nodes=1
 #SBATCH --exclusive
@@ -10,16 +11,16 @@ now=$(date +%Y-%m-%d_%H-%M-%S)
 out_dir=coord-check-impl/${now}
 mkdir -p ${out_dir}
 
-head_size=64
+head_size=32
 
-embeds=(256 384 512 640 768 896 1024 2048)
+embeds=(256 384 512 640 768 896 1024 1280 1536 2048)
 for seed in {0..5}; do
     for emb in "${embeds[@]}"; do
         mup_multiplier=$(echo "scale=2; $emb / 256" | bc)
         n_heads=$(( emb / head_size ))
-        # n_kv_heads=$(( n_heads / 2 ))
+        n_kv_heads=8 #$(( n_heads / 2 ))
         # n_kv_heads is random number between 2 and n_heads
-        n_kv_heads=$(( RANDOM % (n_heads - 1) + 2 ))
+        # n_kv_heads=$(( RANDOM % (n_heads - 1) + 2 ))
 
         echo "mup_muliplier: ${mup_multiplier}, n_heads: ${n_heads}, emb: ${emb}, seed: ${seed}"
         srun python coord_check.py \
