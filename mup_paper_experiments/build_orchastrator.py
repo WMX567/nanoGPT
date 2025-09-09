@@ -3,7 +3,7 @@ import datetime
 import os
 import subprocess
 
-COMMAND_FILE = "/mnt/weka/home/kyle.chickering/code/nanoGPT/paramaterized_train.py"
+COMMAND_FILE = "paramaterized_train.py"
 
 parser = argparse.ArgumentParser()
 
@@ -14,7 +14,7 @@ parser.add_argument('--dry-run', action='store_true', help='Enable dry run mode'
 args = parser.parse_args()
 
 now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-base_logging_dir = "/mnt/weka/home/kyle.chickering/code/nanoGPT/mup_paper_experiments/slurm_logs"
+base_logging_dir = "mup_paper_experiments/slurm_logs"
 logging_dir = f"{base_logging_dir}/{now}"
 orchastrator_dir = f"{logging_dir}/orchastrator"
 
