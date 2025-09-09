@@ -24,6 +24,8 @@ To make sure that the installation is working we can submit a dry-run SLURM job 
 ```
 python mup_paper_experiments/build_orchastrator.py --config_generator_file mup_paper_experiments/configs/ablate_batch_transfer.py --max_concurrent 30 --dry-run
 ```
+Note that the SLURM logs are helpful and can be found saved in `mup_paper_experiments/slurm_logs`, saved in order of launch time.
+
 Check:
 1. That the SLURM job completed.
 2. That things are being logged correctly to WandB.
