@@ -3,9 +3,9 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --mem-per-cpu=32GB
+#SBATCH --mem-per-cpu=8GB
 #SBATCH --time=6:00:00
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:0
 #SBATCH --output=af1ver9.out
 
 set -euo pipefail
