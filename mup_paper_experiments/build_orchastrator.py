@@ -55,7 +55,7 @@ sbatch_headers = f"""#!/bin/bash
 #SBATCH --error={orchastrator_dir}/%A_%a.err
 #SBATCH --mem=8G
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:0
+#SBATCH --gres=gpu:1
 #SBATCH --distribution=pack
 
 """
