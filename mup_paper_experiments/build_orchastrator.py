@@ -3,7 +3,7 @@ import datetime
 import os
 import subprocess
 
-COMMAND_FILE = "paramaterized_train.py"
+COMMAND_FILE = "/scratch1/mengxiwu/nanoGPT/paramaterized_train.py"
 
 parser = argparse.ArgumentParser()
 
