@@ -55,7 +55,6 @@ sbatch_headers = f"""#!/bin/bash
 #SBATCH --error={orchastrator_dir}/%A_%a.err
 #SBATCH --mem=8G
 #SBATCH --partition=main
-#SBATCH --qos=k2m
 #SBATCH --distribution=pack
 
 """

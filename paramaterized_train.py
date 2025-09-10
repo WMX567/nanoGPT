@@ -41,7 +41,7 @@ parser.add_argument('--n_gpus', type=int, default=8) # This will be nproc_per_no
 parser.add_argument('--cpus-per-task', type=int, default=16) # This will be cpus-per-task for srun
 parser.add_argument('--sbatch_logging_dir', type=str, default='slurm_logs')
 parser.add_argument('--sbatch_mem', type=int, default=50)  # Memory in GB
-parser.add_argument('--partition', type=str, default='lowprio')
+parser.add_argument('--partition', type=str, default='gpu')
 parser.add_argument('--qos', type=str, default='lowprio')
 
 # Model testbed arguments
@@ -220,7 +220,6 @@ shell_script = f"""#!/bin/bash
 #SBATCH --error={args.sbatch_logging_dir}/%j.err
 #SBATCH --mem={args.sbatch_mem}G
 #SBATCH --partition={args.partition}
-#SBATCH --qos={args.qos}
 #SBATCH --distribution=pack
 
 {dist_args}
