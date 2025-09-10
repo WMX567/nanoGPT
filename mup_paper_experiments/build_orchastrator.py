@@ -49,7 +49,7 @@ sbatch_headers = f"""#!/bin/bash
 
 #SBATCH --array=0-{num_experiments-1}%{min(args.max_concurrent, num_experiments)}
 #SBATCH --job-name=kyle_orchestrator
-#SBATCH --time=50:00:00
+#SBATCH --time=6:00:00
 #SBATCH --cpus-per-task=1
 #SBATCH --output={orchastrator_dir}/%A_%a.out
 #SBATCH --error={orchastrator_dir}/%A_%a.err
