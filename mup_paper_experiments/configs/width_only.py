@@ -29,7 +29,7 @@ learning_rates = [
 ]
 seeds = [42, 43] if PROD else [42]
 
-WANDB_PROJECT = f'width-only-ablation-lr-decay-coarse-wd-prod={PROD}'
+WANDB_PROJECT = f'width-only-ablation-lr-decay-coarse-wd-prod_{PROD}'
 
 model_configs = [
     {'n_embd': 256,  'n_head': 4,   'n_kv_head': 4,   'n_layer': MODEL_DEPTH, 'weight_decay': WEIGHT_DECAY, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 2, 'gradient_accumulation_steps': 2, 'batch_size': 50, 'max_iters': 981 if PROD else 30},

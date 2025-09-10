@@ -1,5 +1,7 @@
-name: nanogpt
+name: nanogpt-5
 channels:
+  - pytorch
+  - nvidia
   - conda-forge
   - defaults
 dependencies:
@@ -244,4 +246,3 @@ dependencies:
       - xxhash==3.5.0
       - yarl==1.20.0
       - zarr==2.18.3
-prefix: /mnt/weka/home/kyle.chickering/miniconda3/envs/nanogpt
