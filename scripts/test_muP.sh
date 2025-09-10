@@ -13,12 +13,12 @@ set -euo pipefail
 eval "$(conda shell.bash hook)"
 conda activate nanogpt
 
-export WANDB_API_KEY="bc5f2aabe268b0860305212d6f5e59a5ef296b4f"
-wandb login --relogin "$WANDB_API_KEY"
+# export WANDB_API_KEY="bc5f2aabe268b0860305212d6f5e59a5ef296b4f"
+# wandb login --relogin "$WANDB_API_KEY"
 
-export HF_DATASETS_TRUST_REMOTE_CODE=1
+# export HF_DATASETS_TRUST_REMOTE_CODE=1
 
-python /scratch1/mengxiwu/nanoGPT/data/shakespeare/prepare.py
+# python /scratch1/mengxiwu/nanoGPT/data/shakespeare/prepare.py
 
 python /scratch1/mengxiwu/nanoGPT/mup_paper_experiments/build_orchastrator.py \
   --config_generator_file /scratch1/mengxiwu/nanoGPT/mup_paper_experiments/configs/width_only.py \
