@@ -73,36 +73,30 @@ config_str = f"""CONFIGS=(
 
 """
 
-parsing_str = f"""CONFIG_JSON=\"${{CONFIGS[$SLURM_ARRAY_TASK_ID]}}\"
-# Parse the individual configs
-ARGS=\"\"
-while IFS='=' read -r key value; 
+parsing_str = f"""CONFIG_JSON="${{CONFIGS[$SLURM_ARRAY_TASK_ID]}}"
+# Parse the individual configs without jq
+ARGS=""
+IFS=',' read -ra PARAMS <<< "$CONFIG_JSON"
+for param in "${{PARAMS[@]}}"
 do
-    key=$(echo \"$key\" | xargs)
-    value=$(echo \"$value\" | xargs)
+    key=$(echo "$param" | cut -d':' -f1 | sed 's/[{{" }}]//g' | xargs)
+    value=$(echo "$param" | cut -d':' -f2- | sed 's/[{{" }}]//g' | xargs)
 
-    if [ -z \"$key\" ]; 
-    then
+    if [ -z "$key" ]; then
         continue
     fi
-    
-    key=\"${{key%\\"}}\"
-    key=\"${{key#\\"}}\"
 
-    if [ "$value" == "true" ]; 
-    then
+    if [ "$value" == "true" ]; then
         ARGS+=" --$key"
-    elif [ "$value" == "false" ]; 
-    then
+    elif [ "$value" == "false" ]; then
         true # no-op
-    elif [ "$value" == "null" ]; 
-    then
+    elif [ "$value" == "null" ]; then
         true # no-op
     else
         ESCAPED_VALUE=$(printf %q "$value")
-        ARGS+=" --$key ${{ESCAPED_VALUE}}"
+        ARGS+=" --$key $ESCAPED_VALUE"
     fi
-done < <(echo "$CONFIG_JSON" | jq -r 'to_entries[] | .key + "=" + (.value | @json)')
+done
 
 ARGS+=" --sbatch_logging_dir {logging_dir}"
 
