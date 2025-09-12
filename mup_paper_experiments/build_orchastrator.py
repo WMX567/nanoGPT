@@ -56,7 +56,6 @@ sbatch_headers = f"""#!/bin/bash
 #SBATCH --mem=8G
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
-#SBATCH --distribution=pack
 
 """
 
