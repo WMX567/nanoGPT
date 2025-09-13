@@ -31,6 +31,7 @@ for arg in sys.argv[1:]:
         assert arg.startswith('--')
         key, val = arg.split('=')
         key = key[2:]
+
         if key in globals():
             try:
                 if type(globals()[key]) == int or type(globals()[key]) == float or type(globals()[key]) == str:
@@ -42,6 +43,11 @@ for arg in sys.argv[1:]:
             except (SyntaxError, ValueError):
                 # if that goes wrong, just use the string
                 attempt = str(val)
+            
+            # Debug print for type mismatch issues
+            print(f"[configurator.py] Overriding key: {key}")
+            print(f"  Original type: {type(globals()[key])}, value: {globals()[key]}")
+            print(f"  Attempted type: {type(attempt)}, value: {attempt}")
             # ensure the types match ok
             assert type(attempt) == type(globals()[key]), f"Type mismatch for {key}: {type(attempt)} != {type(globals()[key])}. " \
                   f"Please ensure you are passing the correct type for {key}. Key value is: {attempt}"
@@ -50,3 +56,4 @@ for arg in sys.argv[1:]:
             globals()[key] = attempt
         else:
             raise ValueError(f"Unknown config key: {key}")
+

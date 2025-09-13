@@ -106,8 +106,8 @@ normalization = "LayerNorm"
 q_prelayer_normalization = 'None'
 k_prelayer_normalization = 'None'
 complete_p_layers = False
-slurm_job_id = int(os.environ.get('SLURM_JOB_ID', 0))
-slurm_array_task_id = int(os.environ.get('SLURM_ARRAY_TASK_ID', 0))
+slurm_job_id: int = 0
+slurm_array_task_id: int =  0
 anneal_wd = False
 min_wd = 0.0 # minimum weight decay for annealing
 wd_warmup_iters = 1000
@@ -314,9 +314,7 @@ model_args = dict(
 )
 
 if init_from == 'scratch':
-    # init a new model from scratch
     print("Initializing a new model from scratch")
-    # determine the vocab size we'll use for from-scratch training
     if meta_vocab_size is None:
         print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
     model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 50304

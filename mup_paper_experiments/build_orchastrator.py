@@ -10,7 +10,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--config_generator_file', type=str, required=True)
 parser.add_argument('--max_concurrent', type=int, default=30)
 parser.add_argument('--dry-run', action='store_true', help='Enable dry run mode')
-
 args = parser.parse_args()
 
 now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -44,7 +43,6 @@ if configs is None:
     exit(1)
 
 num_experiments = len(configs.split('\n'))
-
 sbatch_headers = f"""#!/bin/bash
 
 #SBATCH --array=0-{num_experiments-1}%{min(args.max_concurrent, num_experiments)}
@@ -109,10 +107,6 @@ wait $PID
 """
 
 shell_script = sbatch_headers + config_str + parsing_str + command_str
-
-# print(sbatch_headers + config_str + parsing_str + command_str)
-
-# print(shell_script)
 
 try:
     process = subprocess.run(
