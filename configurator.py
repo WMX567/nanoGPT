@@ -35,23 +35,23 @@ for arg in sys.argv[1:]:
         if key in globals():
             try:
                 if type(globals()[key]) == int or type(globals()[key]) == float or type(globals()[key]) == str:
-                    # if the value is a number, we can just use it as is
                     attempt = type(globals()[key])(val)
                 else:
-                    # attempt to eval it it (e.g. if bool, number, or etc)
                     attempt = literal_eval(val)
             except (SyntaxError, ValueError):
-                # if that goes wrong, just use the string
                 attempt = str(val)
             
-            # Debug print for type mismatch issues
+            # 强制 slurm_job_id/slurm_array_task_id 为 int
+            if key in ["slurm_job_id", "slurm_array_task_id"]:
+                try:
+                    attempt = int(attempt)
+                except Exception as e:
+                    print(f"[configurator.py] Could not force {key} to int before assertion: {attempt} ({e})")
             print(f"[configurator.py] Overriding key: {key}")
             print(f"  Original type: {type(globals()[key])}, value: {globals()[key]}")
             print(f"  Attempted type: {type(attempt)}, value: {attempt}")
-            # ensure the types match ok
             assert type(attempt) == type(globals()[key]), f"Type mismatch for {key}: {type(attempt)} != {type(globals()[key])}. " \
-                  f"Please ensure you are passing the correct type for {key}. Key value is: {attempt}"
-            # cross fingers
+                    f"Please ensure you are passing the correct type for {key}. Key value is: {attempt}"
             print(f"Overriding: {key} = {attempt}")
             globals()[key] = attempt
         else:
