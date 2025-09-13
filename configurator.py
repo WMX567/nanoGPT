@@ -18,6 +18,7 @@ import sys
 from ast import literal_eval
 
 for arg in sys.argv[1:]:
+
     if '=' not in arg:
         # assume it's the name of a config file
         assert not arg.startswith('--')
@@ -33,20 +34,21 @@ for arg in sys.argv[1:]:
         key = key[2:]
 
         if key in globals():
-            try:
-                if type(globals()[key]) == int or type(globals()[key]) == float or type(globals()[key]) == str:
-                    attempt = type(globals()[key])(val)
-                else:
-                    attempt = literal_eval(val)
-            except (SyntaxError, ValueError):
-                attempt = str(val)
-            
-            # 强制 slurm_job_id/slurm_array_task_id 为 int
+              
             if key in ["slurm_job_id", "slurm_array_task_id"]:
                 try:
                     attempt = int(attempt)
                 except Exception as e:
                     print(f"[configurator.py] Could not force {key} to int before assertion: {attempt} ({e})")
+            else:       
+                try:
+                    if type(globals()[key]) == int or type(globals()[key]) == float or type(globals()[key]) == str:
+                        attempt = type(globals()[key])(val)
+                    else:
+                        attempt = literal_eval(val)
+                except (SyntaxError, ValueError):
+                    attempt = str(val)
+
             print(f"[configurator.py] Overriding key: {key}")
             print(f"  Original type: {type(globals()[key])}, value: {globals()[key]}")
             print(f"  Attempted type: {type(attempt)}, value: {attempt}")
@@ -54,6 +56,7 @@ for arg in sys.argv[1:]:
                     f"Please ensure you are passing the correct type for {key}. Key value is: {attempt}"
             print(f"Overriding: {key} = {attempt}")
             globals()[key] = attempt
+
         else:
             raise ValueError(f"Unknown config key: {key}")
 
