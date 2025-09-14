@@ -45,7 +45,7 @@ parser.add_argument('--partition', type=str, default='gpu')
 parser.add_argument('--qos', type=str, default=None) #'lowprio')
 
 # Model testbed arguments
-parser.add_argument('--out_dir', type=str, default=f'model_training/{now}')
+parser.add_argument('--out_dir', type=str, default=f'/scratch1/mengxiwu/nanoGPT/mup_paper_experiments/model_training/{now}')
 parser.add_argument('--log_wandb', action='store_true')
 parser.add_argument('--wandb_run_name', type=str, default='gpt')
 parser.add_argument('--wandb_project', type=str, default=None)
