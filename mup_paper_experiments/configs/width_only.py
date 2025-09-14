@@ -35,8 +35,8 @@ WANDB_PROJECT = f'width-only-ablation-11'
 
 model_configs = [
     {'n_embd': 256,  'n_head': 4,   'n_kv_head': 4,   'n_layer': MODEL_DEPTH, 'weight_decay': WEIGHT_DECAY, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 2, 'gradient_accumulation_steps': 2, 'batch_size': 50, 'max_iters': 981 if PROD else 30},
-    {'n_embd': 320,  'n_head': 5,   'n_kv_head': 5,   'n_layer': MODEL_DEPTH, 'weight_decay': WEIGHT_DECAY, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 2, 'gradient_accumulation_steps': 2, 'batch_size': 58, 'max_iters': 1139 if PROD else 30},
-    {'n_embd': 384,  'n_head': 6,   'n_kv_head': 6,   'n_layer': MODEL_DEPTH, 'weight_decay': WEIGHT_DECAY, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 2, 'gradient_accumulation_steps': 2, 'batch_size': 66, 'max_iters': 1295 if PROD else 30},
+    # {'n_embd': 320,  'n_head': 5,   'n_kv_head': 5,   'n_layer': MODEL_DEPTH, 'weight_decay': WEIGHT_DECAY, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 2, 'gradient_accumulation_steps': 2, 'batch_size': 58, 'max_iters': 1139 if PROD else 30},
+    # {'n_embd': 384,  'n_head': 6,   'n_kv_head': 6,   'n_layer': MODEL_DEPTH, 'weight_decay': WEIGHT_DECAY, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 2, 'gradient_accumulation_steps': 2, 'batch_size': 66, 'max_iters': 1295 if PROD else 30},
     # {'n_embd': 448,  'n_head': 7,   'n_kv_head': 7,   'n_layer': MODEL_DEPTH, 'weight_decay': WEIGHT_DECAY, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 3, 'gradient_accumulation_steps': 3, 'batch_size': 49, 'max_iters': 1447 if PROD else 30},
     # {'n_embd': 512,  'n_head': 8,   'n_kv_head': 8,   'n_layer': MODEL_DEPTH, 'weight_decay': WEIGHT_DECAY, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 3, 'gradient_accumulation_steps': 3, 'batch_size': 54, 'max_iters': 1597 if PROD else 30},
     # # {'n_embd': 768,  'n_head': 12,  'n_kv_head': 12,  'n_layer': MODEL_DEPTH, 'weight_decay': 0.0, 'log_wandb': 'true', 'wandb_project': WANDB_PROJECT, 'n_gpus': 4, 'gradient_accumulation_steps': 4, 'batch_size': 56, 'max_iters': 2184 if PROD else 30},
@@ -47,7 +47,7 @@ model_configs = [
 ]
 
 configs = []
-for mup in [True, False]:
+for mup in [True]: #, False]:
     for seed in seeds:
         for conf in model_configs:
             for lr in learning_rates:
