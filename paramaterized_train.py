@@ -273,8 +273,8 @@ TRAINING_ARGS=(
     --impl='{args.impl}'
     --decay_profile='{args.decay_profile}'
     --cooldown_iters={args.cooldown_iters}
-    --slurm_job_id="$SLURM_JOB_ID"
-    --slurm_array_task_id="$SLURM_ARRAY_TASK_ID"
+    --slurm_job_id=$SLURM_JOB_ID
+    --slurm_array_task_id=$SLURM_ARRAY_TASK_ID
     --wd_warmup_iters={args.wd_warmup_iters}
     --wd_anneal_iters={args.wd_anneal_iters}
     --adaptive_optimizer={args.adaptive_optimizer}
@@ -287,6 +287,9 @@ TRAINING_ARGS=(
     --moe_null_expert_bias={args.moe_null_expert_bias}
     --moe_random_router={args.moe_random_router}
 )
+
+eval "$(conda shell.bash hook)"
+conda activate nanogpt
 
 srun --export=ALL,MASTER_ADDR,MASTER_PORT,WORKDIR,requirements \\
     torchrun "${{DISTRIBUTED_ARGS[@]}}" {TRAINING_SCRIPT} "${{TRAINING_ARGS[@]}}" &
