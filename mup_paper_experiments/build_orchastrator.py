@@ -54,8 +54,6 @@ sbatch_headers = f"""#!/bin/bash
 #SBATCH --cpus-per-task=1
 #SBATCH --output={orchastrator_dir}/%A_%a.out
 #SBATCH --error={orchastrator_dir}/%A_%a.err
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:0
 """
 
 parsed_config_str = ""
