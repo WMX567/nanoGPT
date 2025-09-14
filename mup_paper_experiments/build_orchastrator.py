@@ -52,12 +52,11 @@ sbatch_headers = f"""#!/bin/bash
 #SBATCH --job-name=kyle_orchestrator
 #SBATCH --time=6:00:00
 #SBATCH --cpus-per-task=1
-#SBATCH --gres=gpu:0
 #SBATCH --output={orchastrator_dir}/%A_%a.out
 #SBATCH --error={orchastrator_dir}/%A_%a.err
 #SBATCH --mem=8G
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:0
 """
 
 parsed_config_str = ""
@@ -110,7 +109,7 @@ wait $PID
 """
 
 shell_script = sbatch_headers + config_str + parsing_str + command_str
-print(shell_script)
+# print(shell_script)
 
 try:
     process = subprocess.run(
