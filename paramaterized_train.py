@@ -39,7 +39,7 @@ parser.add_argument('--sbatch_nodes', type=int, default=1)
 parser.add_argument('--sbatch_exclusive', action='store_true')
 parser.add_argument('--n_gpus', type=int, default=2) # This will be nproc_per_node for torchrun
 parser.add_argument('--cpus-per-task', type=int, default=16) # This will be cpus-per-task for srun
-parser.add_argument('--sbatch_logging_dir', type=str, default='slurm_logs')
+parser.add_argument('--sbatch_logging_dir', type=str, default='/scratch1/mengxiwu/nanoGPT/mup_paper_experiments/slurm_logs')
 parser.add_argument('--sbatch_mem', type=int, default=32)  # Memory in GB
 parser.add_argument('--partition', type=str, default='gpu')
 parser.add_argument('--qos', type=str, default=None) #'lowprio')
