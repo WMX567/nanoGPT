@@ -312,5 +312,7 @@ try:
     process = subprocess.run(['sbatch', '--wait', script_path], text=True, capture_output=True, check=True)
     print(f"Job submitted successfully: {process.stdout.strip()}", flush=True)
 except subprocess.CalledProcessError as e:
-    print(f"Error submitting job: {e.stderr}", flush=True)
-    raise RuntimeError("Failed to submit the sbatch job. Please check the error message above.")
+    print("Return code:", e.returncode)
+    print("STDOUT:", e.stdout)
+    print("STDERR:", e.stderr)
+    raise
