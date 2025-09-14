@@ -61,7 +61,7 @@ for mup in [True, False]:
                 conf['min_lr'] = lr / 10
                 conf['decay_profile'] = 'cosine'
                 conf['decay_lr'] = 'true'
-                conf['dataset'] = 'shakespeare'
+                conf['dataset'] = 'openwebtext'
 
                 if mup:
                     conf['mup'] = 'true'
