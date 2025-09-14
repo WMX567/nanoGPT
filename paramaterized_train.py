@@ -224,10 +224,6 @@ shell_script = f"""#!/bin/bash
 {f'#SBATCH --qos={args.qos}' if args.qos is not None else ''}
 #SBATCH --distribution=pack
 
-unset SLURM_MEM_PER_CPU
-unset SLURM_MEM_PER_NODE
-unset SLURM_MEM_PER_GPU
-
 {dist_args}
 
 TRAINING_ARGS=(
