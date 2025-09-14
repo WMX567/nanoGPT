@@ -308,7 +308,7 @@ try:
     # Use --wait so sbatch will not return until the submitted job completes.
     # This makes the Python submitter block, so the SLURM array task will
     # also wait and thus the array concurrency limit controls concurrent trainings.
-    process = subprocess.run(['sbatch', '--wait'], input=shell_script, text=True, capture_output=True, check=True)
+    process = subprocess.run(['sbatch'], input=shell_script, text=True, capture_output=True, check=True)
     print(f"Job submitted successfully: {process.stdout.strip()}", flush=True)
 except subprocess.CalledProcessError as e:
     print("sbatch failed!")
