@@ -42,7 +42,7 @@ parser.add_argument('--cpus-per-task', type=int, default=16) # This will be cpus
 parser.add_argument('--sbatch_logging_dir', type=str, default='slurm_logs')
 parser.add_argument('--sbatch_mem', type=int, default=32)  # Memory in GB
 parser.add_argument('--partition', type=str, default='gpu')
-parser.add_argument('--qos', type=str, default='lowprio')
+parser.add_argument('--qos', type=str, default=None) #'lowprio')
 
 # Model testbed arguments
 parser.add_argument('--out_dir', type=str, default=f'model_training/{now}')
