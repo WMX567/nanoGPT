@@ -302,23 +302,15 @@ SRUN_PID=$!
 wait $SRUN_PID
 """
 
-with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
-    f.write(shell_script)
-    f.flush()
-    script_path = f.name
-
-try:
-    process = subprocess.run(
-        ["sbatch", script_path],
-        capture_output=True,
-        text=True,
-        check=True
-    )
-    print("Job submitted:", process.stdout.strip())
+try:    
+    with open(os.path.join(args.sbatch_logging_dir, f"sbatch_command.sh"), 'w') as f:
+        f.write(shell_script)
+        script_path = os.path.join(args.sbatch_logging_dir, f"sbatch_command.sh")
+    # Use --wait so sbatch will not return until the submitted job completes.
+    # This makes the Python submitter block, so the SLURM array task will
+    # also wait and thus the array concurrency limit controls concurrent trainings.
+    process = subprocess.run(['sbatch', '--wait', script_path], text=True, capture_output=True, check=True)
+    print(f"Job submitted successfully: {process.stdout.strip()}", flush=True)
 except subprocess.CalledProcessError as e:
-    print("sbatch failed")
-    print("STDOUT:\n", e.stdout)
-    print("STDERR:\n", e.stderr)
-    raise
-finally:
-    os.unlink(script_path)
+    print(f"Error submitting job: {e.stderr}", flush=True)
+    raise RuntimeError("Failed to submit the sbatch job. Please check the error message above.")
