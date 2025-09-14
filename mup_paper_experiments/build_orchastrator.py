@@ -110,6 +110,7 @@ wait $PID
 """
 
 shell_script = sbatch_headers + config_str + parsing_str + command_str
+print(shell_script)
 
 try:
     process = subprocess.run(
