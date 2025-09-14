@@ -221,6 +221,7 @@ shell_script = f"""#!/bin/bash
 #SBATCH --error={args.sbatch_logging_dir}/%j.err
 #SBATCH --mem={args.sbatch_mem}GB
 #SBATCH --mem-per-cpu=0
+#SBATCH --mem-per-gpu=0
 {f'#SBATCH --partition={args.partition}' if args.partition is not None else ''}
 {f'#SBATCH --qos={args.qos}' if args.qos is not None else ''}
 #SBATCH --distribution=pack
