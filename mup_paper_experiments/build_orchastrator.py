@@ -54,6 +54,10 @@ sbatch_headers = f"""#!/bin/bash
 #SBATCH --cpus-per-task=1
 #SBATCH --output={orchastrator_dir}/%A_%a.out
 #SBATCH --error={orchastrator_dir}/%A_%a.err
+
+unset SLURM_MEM_PER_CPU
+unset SLURM_MEM_PER_NODE
+unset SLURM_MEM_PER_GPU
 """
 
 parsed_config_str = ""
