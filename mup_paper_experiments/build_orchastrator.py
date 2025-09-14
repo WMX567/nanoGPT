@@ -24,10 +24,13 @@ os.makedirs(orchastrator_dir, exist_ok=True)
 # run the config to get configs as a string
 def run_config_generator(config_generator_file):
     """Run the config generator script and return its output."""
-    dry_run_flag = "--dry-run" if args.dry_run else ""
+    if args.dry_run:
+        command = ['python', config_generator_file, '--dry-run']
+    else:
+        command = ['python', config_generator_file]
     try:
         result = subprocess.run(
-            ['python', config_generator_file, dry_run_flag],
+            command,
             capture_output=True,
             text=True,
             check=True
@@ -49,11 +52,14 @@ sbatch_headers = f"""#!/bin/bash
 #SBATCH --job-name=kyle_orchestrator
 #SBATCH --time=6:00:00
 #SBATCH --cpus-per-task=1
+#SBATCH --gres=gpu:0
 #SBATCH --output={orchastrator_dir}/%A_%a.out
 #SBATCH --error={orchastrator_dir}/%A_%a.err
 #SBATCH --mem=8G
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
+
+
 
 """
 
