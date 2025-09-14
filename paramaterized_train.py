@@ -40,7 +40,7 @@ parser.add_argument('--sbatch_exclusive', action='store_true')
 parser.add_argument('--n_gpus', type=int, default=2) # This will be nproc_per_node for torchrun
 parser.add_argument('--cpus-per-task', type=int, default=8) # This will be cpus-per-task for srun
 parser.add_argument('--sbatch_logging_dir', type=str, default='/scratch1/mengxiwu/nanoGPT/mup_paper_experiments/slurm_logs')
-parser.add_argument('--sbatch_mem', type=int, default=32)  # Memory in GB
+parser.add_argument('--sbatch_mem', type=int, default=16)  # Memory in GB
 parser.add_argument('--partition', type=str, default='gpu')
 parser.add_argument('--qos', type=str, default=None) #'lowprio')
 
@@ -219,9 +219,8 @@ shell_script = f"""#!/bin/bash
 
 #SBATCH --output={args.sbatch_logging_dir}/%j.out
 #SBATCH --error={args.sbatch_logging_dir}/%j.err
-#SBATCH --mem={args.sbatch_mem}GB
+#SBATCH --mem-per-gpu={args.sbatch_mem}GB
 #SBATCH --mem-per-cpu=0
-#SBATCH --mem-per-gpu=0
 {f'#SBATCH --partition={args.partition}' if args.partition is not None else ''}
 {f'#SBATCH --qos={args.qos}' if args.qos is not None else ''}
 #SBATCH --distribution=pack
