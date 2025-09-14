@@ -9,7 +9,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument('--config_generator_file', type=str, required=True)
 parser.add_argument('--max_concurrent', type=int, default=30)
-parser.add_argument('--dry-run', action='store_true', help='Enable dry run mode')
+parser.add_argument('--dry_run', action='store_true', help='Enable dry run mode')
 args = parser.parse_args()
 
 now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
