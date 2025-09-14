@@ -10,7 +10,7 @@
 import argparse
 import datetime
 import os
-import subprocess
+import subprocess, tempfile, os
 
 def gpt_params(seq_len, vocab_size, d_model, num_heads, num_layers):
     """ Given GPT config calculate total number of parameters """
@@ -302,17 +302,23 @@ SRUN_PID=$!
 wait $SRUN_PID
 """
 
-try:    
-    with open(os.path.join(args.sbatch_logging_dir, f"sbatch_command.sh"), 'w') as f:
-        f.write(shell_script)
-    # Use --wait so sbatch will not return until the submitted job completes.
-    # This makes the Python submitter block, so the SLURM array task will
-    # also wait and thus the array concurrency limit controls concurrent trainings.
-    process = subprocess.run(['sbatch'], input=shell_script, text=True, capture_output=True, check=True)
-    print(f"Job submitted successfully: {process.stdout.strip()}", flush=True)
+with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+    f.write(shell_script)
+    f.flush()
+    script_path = f.name
+
+try:
+    process = subprocess.run(
+        ["sbatch", script_path],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+    print("Job submitted:", process.stdout.strip())
 except subprocess.CalledProcessError as e:
-    print("sbatch failed!")
-    print("Return code:", e.returncode)
+    print("sbatch failed")
     print("STDOUT:\n", e.stdout)
     print("STDERR:\n", e.stderr)
     raise
+finally:
+    os.unlink(script_path)
