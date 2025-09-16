@@ -30,7 +30,7 @@ seeds = [43, 44, 45] if PROD else [43]
 
 for seed in seeds:
     for cfg in base_configs:
-        for impl in ['kyle_impl', 'xllm_impl', 'standard_param_impl']:
+        for impl in ['kyle_impl', 'xllm_impl']: #, 'standard_param_impl']:
             mup = 'false' if impl == 'standard_param_impl' else 'true'
             for lr in learning_rates_sp if mup == 'false' else learning_rates_mup:
                 new_config = cfg.get_config(prod=PROD)

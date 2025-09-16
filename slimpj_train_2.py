@@ -129,7 +129,6 @@ config_keys = [k for k,v in globals().items() if not k.startswith('_') and isins
 exec(open('/scratch1/mengxiwu/nanoGPT/configurator.py').read()) # overrides from command line or config file
 config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
-
 assert not (enable_fsdp and compile), "FSDP and PyTorch 2.0 compilation are mutually exclusive, please disable one of them."
 
 os.makedirs(out_dir, exist_ok=True)
