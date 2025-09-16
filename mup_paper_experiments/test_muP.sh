@@ -8,7 +8,4 @@
 eval "$(conda shell.bash hook)"
 conda activate nanogpt
 
-python /scratch1/mengxiwu/nanoGPT/mup_paper_experiments/build_orchastrator.py \
-  --config_generator_file /scratch1/mengxiwu/nanoGPT/mup_paper_experiments/configs/width_only.py \
-  --max_concurrent 1 \
-  --dry_run
+python mup_paper_experiments/build_orchastrator.py --config_generator_file mup_paper_experiments/configs/ablations_kv_reps_fsdp.py --max_concurrent 30 
