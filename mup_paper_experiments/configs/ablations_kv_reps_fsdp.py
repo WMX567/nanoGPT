@@ -3,7 +3,6 @@
 
 
 import numpy as np
-
 from model_family_configs import (
     kv_reps
 )
@@ -55,6 +54,7 @@ for seed in seeds:
                 new_config['enable_fsdp'] = 'true'
 
                 configs.append(new_config)
+
 
 if __name__ == "__main__":
     import json

@@ -46,6 +46,7 @@ if configs is None:
     exit(1)
 
 num_experiments = len(configs.split('\n'))
+
 sbatch_headers = f"""#!/bin/bash
 
 #SBATCH --array=0-{num_experiments-1}%{min(args.max_concurrent, num_experiments)}
@@ -120,3 +121,6 @@ try:
 except subprocess.CalledProcessError as e:
     print(f"Error submitting job: {e.stderr.strip()}", flush=True)
     exit(1)
+
+
+
