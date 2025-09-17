@@ -18,7 +18,6 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 
 import os
 import time
-import math
 import numpy as np
 import pickle
 import random
@@ -91,7 +90,7 @@ mup = True
 mup_multiplier = 1.0
 coord_check = True
 # impl = tpv_left_impl
-impl = 'xllm_impl'
+impl = 'mengxi_impl'
 seed = 42
 bias = False
 init_std = 0.02
@@ -124,7 +123,7 @@ ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=
 if dataset != 'slim_pajama':
     # poor man's data loader
     if dataset == 'openwebtext':
-        data_dir = '/mnt/weka/home/kyle.chickering/code/nanoGPT-fsdp/data/openwebtext'
+        data_dir = '/scratch1/mengxiwu/nanoGPT/data/openwebtext'
     else:
         data_dir = os.path.join('data', dataset)
     def get_batch(split):

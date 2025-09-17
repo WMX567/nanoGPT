@@ -7,15 +7,11 @@ https://github.com/openai/gpt-2/blob/master/src/model.py
 https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/modeling_gpt2.py
 """
 
-import math
-import inspect
 from dataclasses import dataclass, field
-
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from typing import List
-
 from mup_implementations import standard_param_impl
 
 class Capture(nn.Module):
@@ -106,10 +102,24 @@ class CausalSelfAttention(nn.Module):
 
         self.n_kv_reps = config.n_head // self.n_kv_head
 
+        # --- muP-aware initialization for q, k, v ---
         self.c_q = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-        # n_embd / n_kv_reps = n_kv_head * head_size
+        if 'q_layer' in self.impl:
+            q_init_std = self.impl['q_layer']['init_std'](config.mup_multiplier, config.n_head)
+            nn.init.normal_(self.c_q.weight, mean=0.0, std=q_init_std)
+        # c_kv outputs 2 * (n_embd // n_kv_reps): [k, v]
         self.c_kv = nn.Linear(config.n_embd, 2 * config.n_embd // self.n_kv_reps, bias=config.bias)
         self.c_kv.kv = True
+        if 'k_layer' in self.impl and 'v_layer' in self.impl:
+            # Split c_kv weight for k, v
+            k_dim = config.n_embd // self.n_kv_reps
+            v_dim = config.n_embd // self.n_kv_reps
+            k_init_std = self.impl['k_layer']['init_std'](config.mup_multiplier, config.n_head, self.n_kv_reps)
+            v_init_std = self.impl['v_layer']['init_std'](config.mup_multiplier, self.n_kv_reps)
+            # k weight
+            nn.init.normal_(self.c_kv.weight[:k_dim, :], mean=0.0, std=k_init_std)
+            # v weight
+            nn.init.normal_(self.c_kv.weight[k_dim:k_dim+v_dim, :], mean=0.0, std=v_init_std)
 
         self.kv_capture = Capture()
 
@@ -134,7 +144,6 @@ class CausalSelfAttention(nn.Module):
         elif config.k_prelayer_normalization == 'LayerNormWithBias':
             self.k_prelayer_norm = LayerNorm(config, bias=True)
             
-
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # regularization
         self.attn_dropout = nn.Dropout(config.dropout)
@@ -150,59 +159,70 @@ class CausalSelfAttention(nn.Module):
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
 
-        self.fc_mult = self.impl['hidden']['output_multiplier'](config.mup_multiplier)
+        # muP scaling for q, k, v layers
+        if 'q_layer' in self.impl:
+            self.q_output_mult = self.impl['q_layer']['output_multiplier'](config.mup_multiplier)
+        else:
+            self.q_output_mult = self.impl['hidden']['output_multiplier'](config.mup_multiplier)
+        if 'k_layer' in self.impl:
+            r = config.n_head // config.n_kv_head
+            self.k_output_mult = self.impl['k_layer']['output_multiplier'](config.mup_multiplier, r)
+        else:
+            self.k_output_mult = self.impl['hidden']['output_multiplier'](config.mup_multiplier)
+        if 'v_layer' in self.impl:
+            r = config.n_head // config.n_kv_head
+            self.v_output_mult = self.impl['v_layer']['output_multiplier'](config.mup_multiplier, r)
+        else:
+            self.v_output_mult = self.impl['hidden']['output_multiplier'](config.mup_multiplier)
 
     def forward(self, x):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
 
-        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q = self.fc_mult * self.c_q(x)
-        k, v = ( self.fc_mult * self.c_kv(x) ).split(self.n_embd // self.n_kv_reps, dim=2)
+        # --- Compute Q, K, V with independent muP scaling ---
+        q = self.c_q(x)
+        k, v = self.c_kv(x).split(self.n_embd // self.n_kv_reps, dim=2)
 
+        # Apply muP scaling for q, k, v
+        q = self.q_output_mult * q
+        k = self.k_output_mult * k
+        v = self.v_output_mult * v
+
+        # Optional pre-layer normalization
         if self.q_prelayer_norm is not None:
             q = self.q_prelayer_norm(q)
         if self.k_prelayer_norm is not None:
             k = self.k_prelayer_norm(k)
 
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        # Reshape for multi-head attention
+        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
+        k = k.view(B, T, self.n_kv_head, C // self.n_head)
+        v = v.view(B, T, self.n_kv_head, C // self.n_head)
 
-        k = k.view(B, T, self.n_kv_head, C // self.n_head) # (B, T, n_kvh, hs)
-        v = v.view(B, T, self.n_kv_head, C // self.n_head) # (B, T, n_kvh, hs)
+        # Repeat kv heads as needed and transpose
+        k = repeat_kv(k, self.n_kv_reps).transpose(1, 2)  # (B, nh, T, hs)
+        v = repeat_kv(v, self.n_kv_reps).transpose(1, 2)  # (B, nh, T, hs)
 
-        k = repeat_kv(k, self.n_kv_reps).transpose(1, 2) # (B, nh, T, hs)
-        v = repeat_kv(v, self.n_kv_reps).transpose(1, 2) # (B, nh, T, hs)
-
-        if 'kv_layer' in self.impl.keys():
-            r = self.config.n_head // self.config.n_kv_head
-            k = self.impl['kv_layer']['output_multiplier'](self.config.mup_multiplier, r) * k
-            v = self.impl['kv_layer']['output_multiplier'](self.config.mup_multiplier, r) * v
-
-        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
+        # --- Attention computation ---
         if self.flash:
-            # efficient attention using Flash Attention CUDA kernels
+            # Efficient attention using Flash Attention CUDA kernels
             y = torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True,
                 scale=self.impl['attention_scale'](k.size(-1))
             )
         else:
-            # manual implementation of attention
-            att = (q @ k.transpose(-2, -1)) * self.impl['attention_scale'](k.size(-1)) # (B, nh, T, T)
-            att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
-
-            att = att
-
+            # Manual implementation of attention
+            att = (q @ k.transpose(-2, -1)) * self.impl['attention_scale'](k.size(-1))  # (B, nh, T, T)
+            att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float('-inf'))
             att = F.softmax(att, dim=-1)
             att = self.attn_dropout(att)
-            y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-
+            y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
             y = self.kv_capture(y)
 
-        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+        # Re-assemble all head outputs side by side
+        y = y.transpose(1, 2).contiguous().view(B, T, C)
 
-        y = y 
-
-        # output projection
-        y = self.resid_dropout( self.fc_mult * self.c_proj(y) )
+        # Output projection with muP scaling and dropout
+        y = self.resid_dropout(self.fc_mult * self.c_proj(y))
         return y
 
 class _Expert(nn.Module):
@@ -569,20 +589,27 @@ class GPT(nn.Module):
     def _init_weights(self, module):
         if not self.config.mup:
             return
-            
+
         n0 = self.config.n_embd / self.config.mup_multiplier
         et, ht, kv, ut, rt, rbt, mft1, mft2 = self._get_weight_groups(kv=True)
         for p in et:
             torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['embedding']['init_std'](self.config.mup_multiplier))
 
-        for p in kv:
-            target_mult = 1.0
-
-            if 'kv_layer' in self.impl.keys():
-                r = self.config.n_head // self.config.n_kv_head
-                torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['kv_layer']['init_std'](self.config.mup_multiplier, r))
-            else:
-                torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['hidden']['init_std'](self.config.mup_multiplier))
+        # Improved muP initialization for q, k, v weights
+        for block in self.transformer.h:
+            attn = block.attn
+            # Query
+            if hasattr(attn, 'c_q') and hasattr(self.impl, 'q_layer'):
+                q_std = self.config.init_std * self.impl['q_layer']['init_std'](self.config.mup_multiplier, self.config.n_head)
+                torch.nn.init.normal_(attn.c_q.weight, mean=0.0, std=q_std)
+            # Key/Value
+            if hasattr(attn, 'c_kv') and hasattr(self.impl, 'k_layer') and hasattr(self.impl, 'v_layer'):
+                k_dim = self.config.n_embd // attn.n_kv_reps
+                v_dim = self.config.n_embd // attn.n_kv_reps
+                k_std = self.config.init_std * self.impl['k_layer']['init_std'](self.config.mup_multiplier, self.config.n_head, attn.n_kv_reps)
+                v_std = self.config.init_std * self.impl['v_layer']['init_std'](self.config.mup_multiplier, attn.n_kv_reps)
+                torch.nn.init.normal_(attn.c_kv.weight[:k_dim, :], mean=0.0, std=k_std)
+                torch.nn.init.normal_(attn.c_kv.weight[k_dim:k_dim+v_dim, :], mean=0.0, std=v_std)
 
         for p in ht:
             torch.nn.init.normal_(p, mean=0.0, std=self.config.init_std * self.impl['hidden']['init_std'](self.config.mup_multiplier))
@@ -612,7 +639,6 @@ class GPT(nn.Module):
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
         x = self.transformer.drop( self.emb_mult * (tok_emb + pos_emb) )
-
 
         # iterate through blocks and accumulate MoE aux losses if present
         moe_aux = torch.tensor(0.0, device=device)
@@ -735,16 +761,39 @@ class GPT(nn.Module):
         ht_group['wd_scale'] = self.impl['hidden']['wd_scale'](self.config.mup_multiplier)
         optim_groups.append(ht_group)
 
-        kv_group = {}
-        kv_group['params'] = kv_type
-        if 'kv_layer' in self.impl.keys():
+        # --- muP-compliant optimizer groups for q, k, v ---
+        # Find and group q, k, v weights if present
+        q_params, k_params, v_params = [], [], []
+        for block in self.transformer.h:
+            attn = block.attn
+            if hasattr(attn, 'c_q'):
+                q_params.append(attn.c_q.weight)
+            if hasattr(attn, 'c_kv'):
+                k_dim = self.config.n_embd // attn.n_kv_reps
+                v_dim = self.config.n_embd // attn.n_kv_reps
+                k_params.append(attn.c_kv.weight[:k_dim, :])
+                v_params.append(attn.c_kv.weight[k_dim:k_dim+v_dim, :])
+
+        # q_layer
+        if 'q_layer' in self.impl:
+            q_group = {'params': q_params,
+                       'lr_scale': self.impl['q_layer']['lr_scale'](self.config.mup_multiplier),
+                       'wd_scale': self.impl['q_layer']['wd_scale'](self.config.mup_multiplier)}
+            optim_groups.append(q_group)
+        # k_layer
+        if 'k_layer' in self.impl:
             r = self.config.n_head // self.config.n_kv_head
-            kv_group['lr_scale'] = self.impl['kv_layer']['lr_scale'](self.config.mup_multiplier, r)
-            kv_group['wd_scale'] = self.impl['kv_layer']['wd_scale'](self.config.mup_multiplier, r)
-        else:
-            kv_group['lr_scale'] = self.impl['hidden']['lr_scale'](self.config.mup_multiplier)
-            kv_group['wd_scale'] = self.impl['hidden']['wd_scale'](self.config.mup_multiplier)
-        optim_groups.append(kv_group)
+            k_group = {'params': k_params,
+                       'lr_scale': self.impl['k_layer']['lr_scale'](self.config.mup_multiplier, r),
+                       'wd_scale': self.impl['k_layer']['wd_scale'](self.config.mup_multiplier, r)}
+            optim_groups.append(k_group)
+        # v_layer
+        if 'v_layer' in self.impl:
+            r = self.config.n_head // self.config.n_kv_head
+            v_group = {'params': v_params,
+                       'lr_scale': self.impl['v_layer']['lr_scale'](self.config.mup_multiplier, r),
+                       'wd_scale': self.impl['v_layer']['wd_scale'](self.config.mup_multiplier, r)}
+            optim_groups.append(v_group)
 
         ut_group = {}
         ut_group['params'] = unembedding_type
