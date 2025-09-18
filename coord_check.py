@@ -25,7 +25,7 @@ import torch
 import wandb
 
 from contextlib import nullcontext
-from megatron.core.datasets.indexed_dataset import _IndexReader, IndexedDataset
+from megatron.core.datasets.indexed_dataset import IndexedDataset
 
 from model_moe_kyle import GPTConfig, GPT
 from mup_implementations import (

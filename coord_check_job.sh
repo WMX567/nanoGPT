@@ -1,8 +1,6 @@
 #!/bin/bash
-#SBATCH --account=research
+#SBATCH --partition=gpu
 #SBATCH --time=0:30:00
-#SBATCH --nodes=1
-#SBATCH --exclusive
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
@@ -31,7 +29,7 @@ for seed in {0..5}; do
             --eval_only=False \
             --init_from='scratch' \
             --wandb_log=False \
-            --dataset='slim_pajama' \
+            --dataset='openwebtext' \
             --gradient_accumulation_steps=1 \
             --batch_size=1 \
             --block_size=1024 \
@@ -56,6 +54,6 @@ for seed in {0..5}; do
             --device='cuda' \
             --dtype='float32' \
             --compile=False \
-            --impl='tpv_left_impl'
+            --impl='mengxi_impl'
     done
 done

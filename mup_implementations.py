@@ -25,7 +25,7 @@ standard_param_impl = {
         'lr_scale':             lambda m: 1.0,
         'wd_scale':             lambda m: 1.0,
         'output_multiplier':    lambda m: 1.0
-    },
+    }, 
     'unembedding': {
         'init_std':             lambda m: 1.0 / m**(1/2),
         'lr_scale':             lambda m: 1.0,

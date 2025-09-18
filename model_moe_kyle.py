@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from typing import List
 from mup_implementations import standard_param_impl
 
 class Capture(nn.Module):
@@ -105,8 +104,9 @@ class CausalSelfAttention(nn.Module):
         # --- muP-aware initialization for q, k, v ---
         self.c_q = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         if 'q_layer' in self.impl:
-            q_init_std = self.impl['q_layer']['init_std'](config.mup_multiplier, config.n_head)
+            q_init_std = self.impl['q_layer']['init_std'](config., config.n_head)
             nn.init.normal_(self.c_q.weight, mean=0.0, std=q_init_std)
+        
         # c_kv outputs 2 * (n_embd // n_kv_reps): [k, v]
         self.c_kv = nn.Linear(config.n_embd, 2 * config.n_embd // self.n_kv_reps, bias=config.bias)
         self.c_kv.kv = True
@@ -116,9 +116,9 @@ class CausalSelfAttention(nn.Module):
             v_dim = config.n_embd // self.n_kv_reps
             k_init_std = self.impl['k_layer']['init_std'](config.mup_multiplier, config.n_head, self.n_kv_reps)
             v_init_std = self.impl['v_layer']['init_std'](config.mup_multiplier, self.n_kv_reps)
-            # k weight
+            # k weight initialization
             nn.init.normal_(self.c_kv.weight[:k_dim, :], mean=0.0, std=k_init_std)
-            # v weight
+            # v weight initialization
             nn.init.normal_(self.c_kv.weight[k_dim:k_dim+v_dim, :], mean=0.0, std=v_init_std)
 
         self.kv_capture = Capture()
@@ -159,21 +159,24 @@ class CausalSelfAttention(nn.Module):
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
 
-        # muP scaling for q, k, v layers
+        # muP multiplier for q, k, v layers
+        m = config.mup_multiplier
+        n = config.n_embd // config.n_head
+        r = config.n_head // config.n_kv_head
         if 'q_layer' in self.impl:
-            self.q_output_mult = self.impl['q_layer']['output_multiplier'](config.mup_multiplier)
+            self.q_output_mult = self.impl['q_layer']['output_multiplier'](m, n)
         else:
-            self.q_output_mult = self.impl['hidden']['output_multiplier'](config.mup_multiplier)
+            self.q_output_mult = self.impl['hidden']['output_multiplier'](m)
         if 'k_layer' in self.impl:
             r = config.n_head // config.n_kv_head
-            self.k_output_mult = self.impl['k_layer']['output_multiplier'](config.mup_multiplier, r)
+            self.k_output_mult = self.impl['k_layer']['output_multiplier'](m, n, r)
         else:
-            self.k_output_mult = self.impl['hidden']['output_multiplier'](config.mup_multiplier)
+            self.k_output_mult = self.impl['hidden']['output_multiplier'](m)
         if 'v_layer' in self.impl:
             r = config.n_head // config.n_kv_head
-            self.v_output_mult = self.impl['v_layer']['output_multiplier'](config.mup_multiplier, r)
+            self.v_output_mult = self.impl['v_layer']['output_multiplier'](m, r)
         else:
-            self.v_output_mult = self.impl['hidden']['output_multiplier'](config.mup_multiplier)
+            self.v_output_mult = self.impl['hidden']['output_multiplier'](m)
 
     def forward(self, x):
         B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
@@ -244,7 +247,6 @@ class MLP(nn.Module):
         self.gelu    = nn.GELU()
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
-
         self.fc_mult = config.impl['hidden']['output_multiplier'](config.mup_multiplier)
 
     def forward(self, x):
@@ -405,7 +407,6 @@ class MoE(nn.Module):
             aux = (E**2 * (importance_mean ** 2).sum()).to(device)
         else:
             aux = (E * (importance_mean ** 2).sum()).to(device)
-        # aux = ((importance_mean ** 2).sum()).to(device)
 
         if self.config.moe_random_router:
             logits = torch.rand_like(logits)
@@ -589,6 +590,10 @@ class GPT(nn.Module):
     def _init_weights(self, module):
         if not self.config.mup:
             return
+        
+        m = self.config.mup_multiplier
+        n = self.config.n_embd // self.config.n_head
+        r = self.config.n_head // self.config.n_kv_head
 
         n0 = self.config.n_embd / self.config.mup_multiplier
         et, ht, kv, ut, rt, rbt, mft1, mft2 = self._get_weight_groups(kv=True)
@@ -600,14 +605,14 @@ class GPT(nn.Module):
             attn = block.attn
             # Query
             if hasattr(attn, 'c_q') and hasattr(self.impl, 'q_layer'):
-                q_std = self.config.init_std * self.impl['q_layer']['init_std'](self.config.mup_multiplier, self.config.n_head)
+                q_std = self.config.init_std * self.impl['q_layer']['init_std'](m, n)
                 torch.nn.init.normal_(attn.c_q.weight, mean=0.0, std=q_std)
             # Key/Value
             if hasattr(attn, 'c_kv') and hasattr(self.impl, 'k_layer') and hasattr(self.impl, 'v_layer'):
                 k_dim = self.config.n_embd // attn.n_kv_reps
                 v_dim = self.config.n_embd // attn.n_kv_reps
-                k_std = self.config.init_std * self.impl['k_layer']['init_std'](self.config.mup_multiplier, self.config.n_head, attn.n_kv_reps)
-                v_std = self.config.init_std * self.impl['v_layer']['init_std'](self.config.mup_multiplier, attn.n_kv_reps)
+                k_std = self.config.init_std * self.impl['k_layer']['init_std'](m, n, r)
+                v_std = self.config.init_std * self.impl['v_layer']['init_std'](m, r)
                 torch.nn.init.normal_(attn.c_kv.weight[:k_dim, :], mean=0.0, std=k_std)
                 torch.nn.init.normal_(attn.c_kv.weight[k_dim:k_dim+v_dim, :], mean=0.0, std=v_std)
 
