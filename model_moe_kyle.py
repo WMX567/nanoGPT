@@ -708,6 +708,7 @@ class GPT(nn.Module):
             'gpt2-large':   dict(n_layer=36, n_head=20, n_embd=1280), # 774M params
             'gpt2-xl':      dict(n_layer=48, n_head=25, n_embd=1600), # 1558M params
         }[model_type]
+
         print("forcing vocab_size=50257, block_size=1024, bias=True")
         config_args['vocab_size'] = 50257 # always 50257 for GPT model checkpoints
         config_args['block_size'] = 1024 # always 1024 for GPT model checkpoints
@@ -761,7 +762,7 @@ class GPT(nn.Module):
         
         if has_separate_qkv:
             # Use kv=True to get separated groups, but we'll manually handle qkv parameters
-            embedding_type, hidden_type, kv_type, unembedding_type, router_type, router_bias_type, moe_ffn_type1, moe_ffn_type2 = self._get_weight_groups(kv=True)
+            embedding_type, hidden_type, _, unembedding_type, router_type, router_bias_type, moe_ffn_type1, moe_ffn_type2 = self._get_weight_groups(kv=True)
             
             # Remove q and kv weights from hidden_type since we'll handle them separately
             filtered_hidden_type = []
@@ -780,17 +781,18 @@ class GPT(nn.Module):
                 if id(param) not in qkv_params_set:
                     filtered_hidden_type.append(param)
             
-            # Create separate q, k, v groups
-            q_params, k_params, v_params = [], [], []
+            # Create separate q, kv groups (can't split kv tensor for optimizer)
+            # Note: We cannot pass tensor slices to PyTorch optimizers since they are not leaf tensors.
+            # The k and v portions of c_kv.weight must be optimized together with the same learning rate.
+            # The different scaling for k vs v is handled during forward pass and initialization instead.
+            q_params, kv_params = [], []
             for block in self.transformer.h:
                 attn = block.attn
                 if hasattr(attn, 'c_q'):
                     q_params.append(attn.c_q.weight)
                 if hasattr(attn, 'c_kv'):
-                    k_dim = self.config.n_embd // attn.n_kv_reps
-                    v_dim = self.config.n_embd // attn.n_kv_reps
-                    k_params.append(attn.c_kv.weight[:k_dim, :])
-                    v_params.append(attn.c_kv.weight[k_dim:k_dim+v_dim, :])
+                    # We must pass the full c_kv.weight tensor to optimizer (can't slice)
+                    kv_params.append(attn.c_kv.weight)
         else:
             # Use regular grouping without separate qkv
             embedding_type, hidden_type, unembedding_type, router_type, router_bias_type, moe_ffn_type1, moe_ffn_type2 = self._get_weight_groups(kv=False)
@@ -816,20 +818,19 @@ class GPT(nn.Module):
                            'lr_scale': self.impl['q_layer']['lr_scale'](self.config.mup_multiplier),
                            'wd_scale': self.impl['q_layer']['wd_scale'](self.config.mup_multiplier)}
                 optim_groups.append(q_group)
-            # k_layer
-            if 'k_layer' in self.impl and k_params:
-                r = self.config.n_head // self.config.n_kv_head
-                k_group = {'params': k_params,
-                           'lr_scale': self.impl['k_layer']['lr_scale'](self.config.mup_multiplier),
-                           'wd_scale': self.impl['k_layer']['wd_scale'](self.config.mup_multiplier)}
-                optim_groups.append(k_group)
-            # v_layer
-            if 'v_layer' in self.impl and v_params:
-                r = self.config.n_head // self.config.n_kv_head
-                v_group = {'params': v_params,
-                           'lr_scale': self.impl['v_layer']['lr_scale'](self.config.mup_multiplier),
-                           'wd_scale': self.impl['v_layer']['wd_scale'](self.config.mup_multiplier)}
-                optim_groups.append(v_group)
+            # kv_layer (combined k and v since we can't split the tensor for optimizer)
+            if ('k_layer' in self.impl or 'v_layer' in self.impl) and kv_params:
+                # Use k_layer scaling if available, otherwise fall back to hidden scaling
+                if 'k_layer' in self.impl:
+                    kv_group = {'params': kv_params,
+                               'lr_scale': self.impl['k_layer']['lr_scale'](self.config.mup_multiplier),
+                               'wd_scale': self.impl['k_layer']['wd_scale'](self.config.mup_multiplier)}
+                else:
+                    # If only v_layer is defined, use v_layer scaling
+                    kv_group = {'params': kv_params,
+                               'lr_scale': self.impl['v_layer']['lr_scale'](self.config.mup_multiplier),
+                               'wd_scale': self.impl['v_layer']['wd_scale'](self.config.mup_multiplier)}
+                optim_groups.append(kv_group)
 
         ut_group = {}
         ut_group['params'] = unembedding_type
