@@ -780,11 +780,7 @@ class GPT(nn.Module):
             for param in hidden_type:
                 if id(param) not in qkv_params_set:
                     filtered_hidden_type.append(param)
-            
-            # Create separate q, kv groups (can't split kv tensor for optimizer)
-            # Note: We cannot pass tensor slices to PyTorch optimizers since they are not leaf tensors.
-            # The k and v portions of c_kv.weight must be optimized together with the same learning rate.
-            # The different scaling for k vs v is handled during forward pass and initialization instead.
+         
             q_params, kv_params = [], []
             for block in self.transformer.h:
                 attn = block.attn
