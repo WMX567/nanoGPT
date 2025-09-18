@@ -79,7 +79,6 @@ class LayerNorm(nn.Module):
             self.weight,
             self.bias, 1e-5)
 
-
 def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
     # Lifted from xLLM: Credit Max Ma
     bsz, slen, n_kv_heads, head_dim = x.shape
@@ -104,7 +103,6 @@ class CausalSelfAttention(nn.Module):
         n = config.n_embd // config.n_head
         r = config.n_head // config.n_kv_head
 
-        # --- muP-aware initialization for q, k, v ---
         self.c_q = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         if 'q_layer' in self.impl:
             q_init_std = self.impl['q_layer']['init_std'](m, n)
@@ -113,6 +111,7 @@ class CausalSelfAttention(nn.Module):
         # c_kv outputs 2 * (n_embd // n_kv_reps): [k, v]
         self.c_kv = nn.Linear(config.n_embd, 2 * config.n_embd // self.n_kv_reps, bias=config.bias)
         self.c_kv.kv = True
+
         if 'k_layer' in self.impl and 'v_layer' in self.impl:
             # Split c_kv weight for k, v
             k_dim = config.n_embd // self.n_kv_reps
@@ -172,12 +171,10 @@ class CausalSelfAttention(nn.Module):
         else:
             self.q_output_mult = self.impl['hidden']['output_multiplier'](m)
         if 'k_layer' in self.impl:
-            r = config.n_head // config.n_kv_head
             self.k_output_mult = self.impl['k_layer']['output_multiplier'](n, r)
         else:
             self.k_output_mult = self.impl['hidden']['output_multiplier'](m)
         if 'v_layer' in self.impl:
-            r = config.n_head // config.n_kv_head
             self.v_output_mult = self.impl['v_layer']['output_multiplier'](r)
         else:
             self.v_output_mult = self.impl['hidden']['output_multiplier'](m)
@@ -455,6 +452,7 @@ class Block(nn.Module):
         else:
             y, aux = ffn_out, 0.0
         return x + self.depth_mult * y, aux
+    
 @dataclass                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              
 class GPTConfig:
     block_size: int = 1024

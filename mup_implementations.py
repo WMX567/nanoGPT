@@ -55,22 +55,22 @@ mengxi_impl = {
         'output_multiplier':    lambda m: 1.0
     },
     'q_layer': {
-        'init_std':             lambda m, n: 1/math.sqrt(m*n),
+        'init_std':             lambda m, n: 1 / math.sqrt(m*n),
         'lr_scale':             lambda m: 1 / m,
         'wd_scale':             lambda m: m,
         'output_multiplier':    lambda n: math.sqrt(n),
     },
     'k_layer': {
-        'init_std':             lambda m, n, r: math.sqrt(r/(m*n)),
+        'init_std':             lambda m, n, r: math.sqrt(r / (m*n)),
         'lr_scale':             lambda m: 1 / m,
         'wd_scale':             lambda m: m,
-        'output_multiplier':    lambda n, r: math.sqrt(n/r),
+        'output_multiplier':    lambda n, r: math.sqrt(n / r),
     },
     'v_layer': {
-        'init_std':             lambda m, r: math.sqrt(r/m),
+        'init_std':             lambda m, r: math.sqrt(r / m),
         'lr_scale':             lambda m: 1 / m,
         'wd_scale':             lambda m: m,
-        'output_multiplier':    lambda r: 1/math.sqrt(r),
+        'output_multiplier':    lambda r: 1 / math.sqrt(r),
     },
     'unembedding': {
         'init_std':             lambda m: 1.0 / m,
