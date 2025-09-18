@@ -792,15 +792,15 @@ class GPT(nn.Module):
         if 'k_layer' in self.impl:
             r = self.config.n_head // self.config.n_kv_head
             k_group = {'params': k_params,
-                       'lr_scale': self.impl['k_layer']['lr_scale'](self.config.mup_multiplier, r),
-                       'wd_scale': self.impl['k_layer']['wd_scale'](self.config.mup_multiplier, r)}
+                       'lr_scale': self.impl['k_layer']['lr_scale'](self.config.mup_multiplier),
+                       'wd_scale': self.impl['k_layer']['wd_scale'](self.config.mup_multiplier)}
             optim_groups.append(k_group)
         # v_layer
         if 'v_layer' in self.impl:
             r = self.config.n_head // self.config.n_kv_head
             v_group = {'params': v_params,
-                       'lr_scale': self.impl['v_layer']['lr_scale'](self.config.mup_multiplier, r),
-                       'wd_scale': self.impl['v_layer']['wd_scale'](self.config.mup_multiplier, r)}
+                       'lr_scale': self.impl['v_layer']['lr_scale'](self.config.mup_multiplier),
+                       'wd_scale': self.impl['v_layer']['wd_scale'](self.config.mup_multiplier)}
             optim_groups.append(v_group)
 
         ut_group = {}
