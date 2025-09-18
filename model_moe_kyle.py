@@ -755,7 +755,46 @@ class GPT(nn.Module):
         extra_args = dict(fused=True) if use_fused else dict()
 
         optim_groups = []
-        embedding_type, hidden_type, kv_type, unembedding_type, router_type, router_bias_type, moe_ffn_type1, moe_ffn_type2 = self._get_weight_groups(kv=True)
+        
+        # Check if we need separate q, k, v groups
+        has_separate_qkv = 'q_layer' in self.impl or 'k_layer' in self.impl or 'v_layer' in self.impl
+        
+        if has_separate_qkv:
+            # Use kv=True to get separated groups, but we'll manually handle qkv parameters
+            embedding_type, hidden_type, kv_type, unembedding_type, router_type, router_bias_type, moe_ffn_type1, moe_ffn_type2 = self._get_weight_groups(kv=True)
+            
+            # Remove q and kv weights from hidden_type since we'll handle them separately
+            filtered_hidden_type = []
+            qkv_params_set = set()
+            
+            # Collect all q, k, v parameters that we want to handle separately
+            for block in self.transformer.h:
+                attn = block.attn
+                if hasattr(attn, 'c_q'):
+                    qkv_params_set.add(id(attn.c_q.weight))
+                if hasattr(attn, 'c_kv'):
+                    qkv_params_set.add(id(attn.c_kv.weight))
+            
+            # Filter out qkv params from hidden_type
+            for param in hidden_type:
+                if id(param) not in qkv_params_set:
+                    filtered_hidden_type.append(param)
+            
+            # Create separate q, k, v groups
+            q_params, k_params, v_params = [], [], []
+            for block in self.transformer.h:
+                attn = block.attn
+                if hasattr(attn, 'c_q'):
+                    q_params.append(attn.c_q.weight)
+                if hasattr(attn, 'c_kv'):
+                    k_dim = self.config.n_embd // attn.n_kv_reps
+                    v_dim = self.config.n_embd // attn.n_kv_reps
+                    k_params.append(attn.c_kv.weight[:k_dim, :])
+                    v_params.append(attn.c_kv.weight[k_dim:k_dim+v_dim, :])
+        else:
+            # Use regular grouping without separate qkv
+            embedding_type, hidden_type, unembedding_type, router_type, router_bias_type, moe_ffn_type1, moe_ffn_type2 = self._get_weight_groups(kv=False)
+            filtered_hidden_type = hidden_type
 
         et_group = {}
         et_group['params'] = embedding_type
@@ -764,44 +803,33 @@ class GPT(nn.Module):
         optim_groups.append(et_group)
 
         ht_group = {}
-        ht_group['params'] = hidden_type
+        ht_group['params'] = filtered_hidden_type
         ht_group['lr_scale'] = self.impl['hidden']['lr_scale'](self.config.mup_multiplier)
         ht_group['wd_scale'] = self.impl['hidden']['wd_scale'](self.config.mup_multiplier)
         optim_groups.append(ht_group)
 
         # --- muP-compliant optimizer groups for q, k, v ---
-        # Find and group q, k, v weights if present
-        q_params, k_params, v_params = [], [], []
-        for block in self.transformer.h:
-            attn = block.attn
-            if hasattr(attn, 'c_q'):
-                q_params.append(attn.c_q.weight)
-            if hasattr(attn, 'c_kv'):
-                k_dim = self.config.n_embd // attn.n_kv_reps
-                v_dim = self.config.n_embd // attn.n_kv_reps
-                k_params.append(attn.c_kv.weight[:k_dim, :])
-                v_params.append(attn.c_kv.weight[k_dim:k_dim+v_dim, :])
-
-        # q_layer
-        if 'q_layer' in self.impl:
-            q_group = {'params': q_params,
-                       'lr_scale': self.impl['q_layer']['lr_scale'](self.config.mup_multiplier),
-                       'wd_scale': self.impl['q_layer']['wd_scale'](self.config.mup_multiplier)}
-            optim_groups.append(q_group)
-        # k_layer
-        if 'k_layer' in self.impl:
-            r = self.config.n_head // self.config.n_kv_head
-            k_group = {'params': k_params,
-                       'lr_scale': self.impl['k_layer']['lr_scale'](self.config.mup_multiplier),
-                       'wd_scale': self.impl['k_layer']['wd_scale'](self.config.mup_multiplier)}
-            optim_groups.append(k_group)
-        # v_layer
-        if 'v_layer' in self.impl:
-            r = self.config.n_head // self.config.n_kv_head
-            v_group = {'params': v_params,
-                       'lr_scale': self.impl['v_layer']['lr_scale'](self.config.mup_multiplier),
-                       'wd_scale': self.impl['v_layer']['wd_scale'](self.config.mup_multiplier)}
-            optim_groups.append(v_group)
+        if has_separate_qkv:
+            # q_layer
+            if 'q_layer' in self.impl and q_params:
+                q_group = {'params': q_params,
+                           'lr_scale': self.impl['q_layer']['lr_scale'](self.config.mup_multiplier),
+                           'wd_scale': self.impl['q_layer']['wd_scale'](self.config.mup_multiplier)}
+                optim_groups.append(q_group)
+            # k_layer
+            if 'k_layer' in self.impl and k_params:
+                r = self.config.n_head // self.config.n_kv_head
+                k_group = {'params': k_params,
+                           'lr_scale': self.impl['k_layer']['lr_scale'](self.config.mup_multiplier),
+                           'wd_scale': self.impl['k_layer']['wd_scale'](self.config.mup_multiplier)}
+                optim_groups.append(k_group)
+            # v_layer
+            if 'v_layer' in self.impl and v_params:
+                r = self.config.n_head // self.config.n_kv_head
+                v_group = {'params': v_params,
+                           'lr_scale': self.impl['v_layer']['lr_scale'](self.config.mup_multiplier),
+                           'wd_scale': self.impl['v_layer']['wd_scale'](self.config.mup_multiplier)}
+                optim_groups.append(v_group)
 
         ut_group = {}
         ut_group['params'] = unembedding_type
