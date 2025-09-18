@@ -100,11 +100,14 @@ class CausalSelfAttention(nn.Module):
         self.n_kv_head = config.n_kv_head
 
         self.n_kv_reps = config.n_head // self.n_kv_head
+        m = config.mup_multiplier
+        n = config.n_embd // config.n_head
+        r = config.n_head // config.n_kv_head
 
         # --- muP-aware initialization for q, k, v ---
         self.c_q = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         if 'q_layer' in self.impl:
-            q_init_std = self.impl['q_layer']['init_std'](config., config.n_head)
+            q_init_std = self.impl['q_layer']['init_std'](m, n)
             nn.init.normal_(self.c_q.weight, mean=0.0, std=q_init_std)
         
         # c_kv outputs 2 * (n_embd // n_kv_reps): [k, v]
@@ -114,8 +117,8 @@ class CausalSelfAttention(nn.Module):
             # Split c_kv weight for k, v
             k_dim = config.n_embd // self.n_kv_reps
             v_dim = config.n_embd // self.n_kv_reps
-            k_init_std = self.impl['k_layer']['init_std'](config.mup_multiplier, config.n_head, self.n_kv_reps)
-            v_init_std = self.impl['v_layer']['init_std'](config.mup_multiplier, self.n_kv_reps)
+            k_init_std = self.impl['k_layer']['init_std'](m, n, r)
+            v_init_std = self.impl['v_layer']['init_std'](m, r)
             # k weight initialization
             nn.init.normal_(self.c_kv.weight[:k_dim, :], mean=0.0, std=k_init_std)
             # v weight initialization

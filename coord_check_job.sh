@@ -6,10 +6,8 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --output=coord.out
 
-
 eval "$(conda shell.bash hook)"
 conda activate nanogpt
-
 
 now=$(date +%Y-%m-%d_%H-%M-%S)
 out_dir=coord-check-impl/${now}
