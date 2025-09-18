@@ -167,7 +167,7 @@ class CausalSelfAttention(nn.Module):
         n = config.n_embd // config.n_head
         r = config.n_head // config.n_kv_head
         if 'q_layer' in self.impl:
-            self.q_output_mult = self.impl['q_layer']['output_multiplier'](m, n)
+            self.q_output_mult = self.impl['q_layer']['output_multiplier'](n)
         else:
             self.q_output_mult = self.impl['hidden']['output_multiplier'](m)
         if 'k_layer' in self.impl:
