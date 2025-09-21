@@ -13,7 +13,7 @@ now=$(date +%Y-%m-%d_%H-%M-%S)
 out_dir=mu_transfer_results/${now}
 mkdir -p ${out_dir}
 
-with =512
+width=512
 n_layers=3
 n_kv_head=4
 n_heads=4
