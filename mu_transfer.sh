@@ -24,7 +24,7 @@ wd=0.12062
 seed=0
 
 echo "width: ${width}, n_heads: ${n_heads}, n_kv_head: ${n_kv_head}, lr: ${lr}, wd: ${wd}, seed: ${seed}"
-            torchrun --nproc_per_node=2 mu_transfer.py \
+            python mu_transfer.py \
             --out_dir=${out_dir} \
             --n_embd=${width} \
             --n_layer=${n_layers} \

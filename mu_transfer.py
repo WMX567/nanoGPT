@@ -145,11 +145,7 @@ if dataset != 'slim_pajama':
         ix = torch.randint(len(data) - block_size, (batch_size,))
         x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
         y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
-        if device_type == 'cuda':
-            # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-            x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
-        else:
-            x, y = x.to(device), y.to(device)
+        # Device will be set in the main function
         return x, y
 else:
     path_prefix = "/mnt/sharefs/data/pretrain_tokenized/SlimPajama-627B_250k_tokenized/merged/slimpajama-train-chunk1"
@@ -189,12 +185,7 @@ else:
         x = torch.tensor(X_batch, dtype=torch.long)
         y = torch.tensor(Y_batch, dtype=torch.long)
 
-        if device_type == 'cuda':
-            # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-            x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
-        else:
-            x, y = x.to(device), y.to(device)
-        
+        # Device will be set in the main function
         return x, y
 
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
@@ -247,6 +238,8 @@ def main_worker(local_rank, world_size):
             print(f"[GPU {local_rank}] MFU: {mfu:.4f}")
         except Exception as e:
             print(f"[GPU {local_rank}] MFU error: {e}")
+    
+    # Initialize distributed training
     dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=local_rank)
     torch.cuda.set_device(local_rank)
     device = f'cuda:{local_rank}'
@@ -307,8 +300,128 @@ def main_worker(local_rank, world_size):
             'log2lr': np.log2(learning_rate),
             'param_type': param_type
         }).to_csv(f"{out_dir}/width{n_embd}_log2lr{np.log2(learning_rate):.2f}.csv", index=False)
-    dist.destroy_process_group()
+def main():
+    # Check if we're running under torchrun (distributed environment already set up)
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        # We're running under torchrun, use the existing distributed setup
+        local_rank = int(os.environ['LOCAL_RANK'])
+        world_size = int(os.environ['WORLD_SIZE'])
+        global_rank = int(os.environ['RANK'])
+        
+        # Initialize distributed training
+        dist.init_process_group(backend='nccl')
+        torch.cuda.set_device(local_rank)
+        device = f'cuda:{local_rank}'
+        use_ddp = True
+        
+        def print_mfu(model, fwdbwd_per_iter, dt):
+            try:
+                mfu = model.module.estimate_mfu(fwdbwd_per_iter, dt)
+                if global_rank == 0:
+                    print(f"[GPU {local_rank}] MFU: {mfu:.4f}")
+            except Exception as e:
+                if global_rank == 0:
+                    print(f"[GPU {local_rank}] MFU error: {e}")
+        
+        # Set up device and context
+        seed_everything(seed + global_rank)
+    else:
+        # Single GPU training
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        if device == 'cuda':
+            torch.cuda.set_device(0)
+        use_ddp = False
+        global_rank = 0
+        local_rank = 0
+        
+        def print_mfu(model, fwdbwd_per_iter, dt):
+            try:
+                if hasattr(model, 'module'):
+                    mfu = model.module.estimate_mfu(fwdbwd_per_iter, dt)
+                else:
+                    mfu = model.estimate_mfu(fwdbwd_per_iter, dt)
+                print(f"MFU: {mfu:.4f}")
+            except Exception as e:
+                print(f"MFU error: {e}")
+        
+        # Set up device and context
+        seed_everything(seed)
+    
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    device_type = 'cuda' if 'cuda' in device else 'cpu'
+    ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
+    ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+
+    param_type = 'mup'
+    model = build_model(n_embd, param_type, device)
+    
+    if use_ddp:
+        model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+    
+    model_for_optimizer = model.module if use_ddp else model
+    optimizer = model_for_optimizer.configure_optimizers(
+        weight_decay=weight_decay,
+        learning_rate=learning_rate,
+        betas=(beta1, beta2),
+        eps=eps,
+        device_type=device_type,
+        adaptive_optimizer=False
+    )
+    scaler = torch.amp.GradScaler('cuda', enabled=(dtype == 'float16'))
+    losses = []
+    optimizer.zero_grad(set_to_none=True)
+    
+    import time
+    t0 = time.time()
+    for step in range(max_iters):
+        x, y = get_batch('train')
+        # Move data to device
+        if device_type == 'cuda':
+            x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+        else:
+            x, y = x.to(device), y.to(device)
+        
+        with ctx:
+            outputs = model(x, y)
+            if isinstance(outputs, tuple):
+                loss = outputs[1] if outputs[1] is not None else outputs[0]
+            else:
+                loss = outputs
+            loss = loss / gradient_accumulation_steps
+        scaler.scale(loss).backward()
+        if (step + 1) % gradient_accumulation_steps == 0:
+            if grad_clip != 0.0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad(set_to_none=True)
+        losses.append(loss.item() * gradient_accumulation_steps)
+        # Print loss and MFU every 10 steps (only on rank 0)
+        if (step + 1) % 10 == 0 and global_rank == 0:
+            dt = time.time() - t0
+            print(f"Step {step+1} | Loss: {loss.item() * gradient_accumulation_steps:.6f}")
+            print_mfu(model, gradient_accumulation_steps, dt)
+            t0 = time.time()
+    
+    if global_rank == 0:
+        out_dir_full = f"{out_dir}/{param_type}/"
+        os.makedirs(out_dir_full, exist_ok=True)
+        pd.DataFrame({
+            'step': np.arange(max_iters),
+            'loss': losses,
+            'width': n_embd,
+            'log2lr': np.log2(learning_rate),
+            'param_type': param_type
+        }).to_csv(f"{out_dir_full}/width{n_embd}_log2lr{np.log2(learning_rate):.2f}.csv", index=False)
+    
+    if use_ddp:
+        dist.destroy_process_group()
+    else:
+        # Fallback to mp.spawn for backwards compatibility
+        world_size = int(os.environ.get("WORLD_SIZE", 2))
+        mp.spawn(main_worker, args=(world_size,), nprocs=world_size)
 
 if __name__ == "__main__":
-    world_size = int(os.environ.get("WORLD_SIZE", 2))
-    mp.spawn(main_worker, args=(world_size,), nprocs=world_size)
+    main()
