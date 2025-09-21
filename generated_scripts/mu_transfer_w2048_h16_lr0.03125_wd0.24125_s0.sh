@@ -4,7 +4,7 @@
                 #SBATCH --gres=gpu:1
                 #SBATCH --ntasks-per-node=1
                 #SBATCH --cpus-per-task=4
-                #SBATCH --mem=128G
+                #SBATCH --mem=50G
                 #SBATCH --output=mu_transfer_w2048_h16_lr0.03125_wd0.24125_s0.out
 
                 eval "$(conda shell.bash hook)"
@@ -30,29 +30,9 @@
                 echo "grad_accum_steps: ${grad_accum_steps}"
                 echo "output_dir: ${out_dir}"
 
-                python /scratch1/mengxiwu/nanoGPT/mu_transfer.py \
-                    --out_dir=${out_dir} \
-                    --n_embd=${width} \
-                    --n_layer=${n_layers} \
-                    --n_head=${n_heads} \
-                    --n_kv_head=${n_kv_head} \
-                    --batch_size=${batch_size} \
-                    --max_iters=${steps} \
-                    --learning_rate=${lr} \
-                    --weight_decay=${wd} \
-                    --seed=${seed} \
-                    --block_size=1024 \
-                    --dropout=0.0 \
-                    --bias=False \
-                    --init_std=0.02 \
-                    --beta1=0.9 \
-                    --beta2=0.95 \
-                    --grad_clip=1.0 \
-                    --decay_lr=False \
-                    --device='cuda' \
-                    --dtype='bfloat16' \
-                    --impl='mengxi_impl' \
-                    --compile=False \
+                python mu_transfer.py \
+                --out_dir=${out_dir} \
+                --n_embd=${width}                 --n_layer=${n_layers}                 --n_head=${n_heads}                 --n_kv_head=${n_kv_head}                 --batch_size=${batch_size}                 --max_iters=${steps}                 --learning_rate=${lr}                 --weight_decay=${wd}                 --seed=${seed}                 --block_size=1024                 --dropout=0.0                 --bias=False                 --init_std=0.02                 --beta1=0.9                 --beta2=0.95                 --grad_clip=1.0                 --decay_lr=False                 --device='cuda:0'                 --dtype='bfloat16'                 --compile=False
 
                 echo "Training completed for w${width}_h${n_heads}_lr${lr}_wd${wd}_s${seed}"
                 
