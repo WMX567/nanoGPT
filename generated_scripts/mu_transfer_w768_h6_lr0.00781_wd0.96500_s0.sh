@@ -2,7 +2,7 @@
                 #SBATCH --partition=gpu
                 #SBATCH --time=12:00:00
                 #SBATCH --gres=gpu:1
-                #SBATCH --mem=32G 
+                #SBATCH --mem=64G 
                 #SBATCH --ntasks-per-node=1
                 #SBATCH --cpus-per-task=4
                 #SBATCH --output=mu_transfer_w768_h6_lr0.00781_wd0.96500_s0.out

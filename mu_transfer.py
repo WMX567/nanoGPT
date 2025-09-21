@@ -1,422 +1,219 @@
-
-import torch
-import pandas as pd
 import os
-import numpy as np
-import pickle
 import random
+import pickle
+import time
+import argparse
+import numpy as np
+import pandas as pd
 import torch
-
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from contextlib import nullcontext
-from megatron.core.datasets.indexed_dataset import IndexedDataset
-
 from model_moe_kyle import GPTConfig, GPT
-from mup_implementations import (
-    impl_dict
-)
+from mup_implementations import impl_dict
 
-def build_model(width, param_type, device):
-    # param_type: 'sp' or 'mup'
-    if param_type == 'sp':
-        mup_flag = False
-        impl = impl_dict['standard_param_impl']
-        mup_multiplier = 1.0
-    else:
-        mup_flag = True
-        impl = impl_dict['mengxi_impl']
-        mup_multiplier = width / 512
-
-    model_args = dict(
-        n_layer=n_layer, n_head=n_head, n_kv_head=n_kv_head, n_embd=width, block_size=block_size,
-        bias=bias, vocab_size=meta_vocab_size if 'meta_vocab_size' in globals() and meta_vocab_size is not None else 50304, dropout=dropout,
-        mup=mup_flag, mup_multiplier=mup_multiplier, init_std=init_std, impl=impl, normalization=normalization,
-        use_moe=use_moe, num_experts=num_experts, router_topk=router_topk, moe_ffn_hidden_size=moe_ffn_hidden_size,
-        moe_seq_aux_loss_coeff=moe_seq_aux_loss_coeff, moe_ffn_mup_multiplier=moe_ffn_mup_multiplier,
-        moe_random_router=moe_random_router
-    )
-    gptconf = GPTConfig(**model_args)
-    model = GPT(gptconf).to(device)
-    return model
 
 def seed_everything(seed=42):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed) # 如果使用多GPU，应为 torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-# -----------------------------------------------------------------------------
-# default config values designed to train a gpt2 (124M) on OpenWebText
-out_dir = 'out'
-eval_interval = 2000
-log_interval = 1
-eval_iters = 200
-eval_only = False # if True, script exits right after the first eval
-always_save_checkpoint = True # if True, always save a checkpoint after each eval
-init_from = 'scratch' # 'scratch' or 'resume' or 'gpt2*'
-# wandb logging
-wandb_log = False # disabled by default
-wandb_project = 'owt'
-wandb_run_name = 'gpt2' # 'run' + str(time.time())
-# data
-dataset = 'openwebtext'
-gradient_accumulation_steps = 5 * 8 # used to simulate larger batch sizes
-batch_size = 12 # if gradient_accumulation_steps > 1, this is the micro-batch size
-block_size = 1024
-# model
-n_layer = 12
-n_head = 12
-n_kv_head = n_head
-n_embd = 768
-dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
-bias = False # do we use bias inside LayerNorm and Linear layers?
-# adamw optimizer
-learning_rate = 6e-4 # max learning rate
-max_iters = 600000 # total number of training iterations
-warmup_iters = 2000 # how many steps to warm up for
-weight_decay = 0.0
-beta1 = 0.9
-beta2 = 0.95
-eps = 1e-8 
-grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
-# learning rate decay settings
-decay_lr = True # whether to decay the learning rate
-warmup_iters = 0 # how many steps to warm up for
-lr_decay_iters = 600000 # should be ~= max_iters per Chinchilla
-min_lr = 6e-5 # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
-# DDP settings
-backend = 'nccl' # 'nccl', 'gloo', etc.
-# system
-device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
-# dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
-dtype = 'float32'
-compile = True # use PyTorch 2.0 to compile the model to be faster
-mup = True
-mup_multiplier = 1.0
-coord_check = True
-# impl = tpv_left_impl
-impl = 'mengxi_impl'
-seed = 42
-bias = False
-init_std = 0.02
-coord_check = True
-normalization = "LayerNorm"
-tag = "default"  # Tag for coordinate checking data
-use_moe: bool = False
-num_experts: int = 0
-router_topk: int = 8
-moe_ffn_hidden_size: int = 128
-moe_seq_aux_loss_coeff: float = 1e-4
-moe_ffn_mup_multiplier: float = 1.0
-moe_random_router: bool = False
-# -----------------------------------------------------------------------------
-config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
-exec(open('/scratch1/mengxiwu/nanoGPT/configurator.py').read()) # overrides from command line or config file
-config = {k: globals()[k] for k in config_keys} # will be useful for logging
-# -----------------------------------------------------------------------------
+def get_args():
+    parser = argparse.ArgumentParser(description='Train a GPT model with muP.')
+    parser.add_argument('--out_dir', type=str, default='out', help='Output directory for checkpoints and logs.')
+    parser.add_argument('--dataset', type=str, default='openwebtext', help='Dataset name (e.g., openwebtext).')
+    parser.add_argument('--n_layer', type=int, default=12, help='Number of transformer layers.')
+    parser.add_argument('--n_head', type=int, default=12, help='Number of attention heads.')
+    parser.add_argument('--n_kv_head', type=int, default=12, help='Number of key/value heads (for GQA).')
+    parser.add_argument('--n_embd', type=int, default=768, help='Embedding dimension (model width).')
+    parser.add_argument('--block_size', type=int, default=1024, help='Sequence length.')
+    parser.add_argument('--dropout', type=float, default=0.0, help='Dropout rate.')
+    parser.add_argument('--bias', action='store_true', help='Use bias in Linear and LayerNorm layers.')
+    parser.add_argument('--init_std', type=float, default=0.02, help='Initialization standard deviation for muP.')
 
-os.makedirs(out_dir, exist_ok=True)
-seed_everything(seed)
-torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
-torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
-device_type = 'cuda' if 'cuda' in device else 'cpu' # for later use in torch.autocast
-ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
-ptimpl = impl_dict[impl] if isinstance(impl, str) else impl
-ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+    parser.add_argument('--batch_size', type=int, default=12, help='Micro-batch size.')
+    parser.add_argument('--max_iters', type=int, default=600000, help='Total number of training iterations.')
+    parser.add_argument('--gradient_accumulation_steps', type=int, default=40, help='Simulate larger batch sizes.')
+    
+    parser.add_argument('--learning_rate', type=float, default=6e-4, help='Max learning rate.')
+    parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay.')
+    parser.add_argument('--beta1', type=float, default=0.9, help='AdamW beta1.')
+    parser.add_argument('--beta2', type=float, default=0.95, help='AdamW beta2.')
+    parser.add_argument('--eps', type=float, default=1e-8, help='AdamW epsilon.')
+    parser.add_argument('--grad_clip', type=float, default=1.0, help='Gradient clipping value.')
+    parser.add_argument('--decay_lr', action='store_false', help='Disable learning rate decay.')
 
-if dataset != 'slim_pajama':
-    # poor man's data loader
-    if dataset == 'openwebtext':
-        data_dir = '/scratch1/mengxiwu/nanoGPT/data/openwebtext'
-    else:
-        data_dir = os.path.join('data', dataset)
-    def get_batch(split):
-        # We recreate np.memmap every batch to avoid a memory leak, as per
-        # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
-        if split == 'train':
-            if dataset == 'slim_pajama':
-                data = np.memmap('/mnt/sharefs/data/pretrain_tokenized/SlimPajama-627B_250k_tokenized/merged/slimpajama-train-chunk1.bin', dtype=np.uint16, mode='r')
-            else:
-                data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
+    parser.add_argument('--device', type=str, default='cuda', help='Device to use (e.g., cpu, cuda, cuda:0).')
+    parser.add_argument('--dtype', type=str, default='bfloat16', choices=['float32', 'bfloat16', 'float16'], help='Data type for training.')
+    parser.add_argument('--compile', action='store_false', help='Disable PyTorch 2.0 model compilation.')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed.')
+    
+    parser.add_argument('--use_moe', action='store_true', help='Enable Mixture of Experts.')
+    parser.add_argument('--num_experts', type=int, default=8, help='Number of experts in MoE.')
+    parser.add_argument('--router_topk', type=int, default=2, help='Number of experts to route to for each token.')
+
+    return parser.parse_args()
+
+
+data_loaders = {'train': None, 'val': None}
+
+def init_data_loader(split, data_dir, block_size):
+    
+    global data_loaders
+    if data_loaders.get(split) is None:
+        file_path = os.path.join(data_dir, f'{split}.bin')
+        if os.path.exists(file_path):
+            data_loaders[split] = np.memmap(file_path, dtype=np.uint16, mode='r')
         else:
-            data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
-        ix = torch.randint(len(data) - block_size, (batch_size,))
-        x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
-        y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
-        # Device will be set in the main function
-        return x, y
-else:
-    path_prefix = "/mnt/sharefs/data/pretrain_tokenized/SlimPajama-627B_250k_tokenized/merged/slimpajama-train-chunk1"
-    slimpj_dataset = IndexedDataset(path_prefix)
+            raise FileNotFoundError(f"Data file not found at {file_path}")
 
-    data_buffer = []
-    dataset_idx = 0
+def get_batch(split, batch_size, block_size, device):
 
-    def get_batch(_):
-        global dataset_idx, data_buffer
+    data = data_loaders.get(split)
+    if data is None:
+        raise RuntimeError(f"Data loader for split '{split}' not initialized.")
+        
+    ix = torch.randint(len(data) - block_size, (batch_size,))
 
-        X_batch = []
-        Y_batch = []
+    x = torch.empty(batch_size, block_size, dtype=torch.long)
+    y = torch.empty(batch_size, block_size, dtype=torch.long)
+    
+    for j, i in enumerate(ix):
+        chunk_x = data[i:i+block_size]
+        chunk_y = data[i+1:i+1+block_size]
+        x[j] = torch.from_numpy(chunk_x.astype(np.int32)).long()
+        y[j] = torch.from_numpy(chunk_y.astype(np.int32)).long()
 
-        while len(X_batch) < batch_size:
-            while len(data_buffer) < (2 * block_size):
-                new_sample = slimpj_dataset.get(dataset_idx)
-                dataset_idx += 1
+    if 'cuda' in device:
+        return x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+    else:
+        return x.to(device), y.to(device)
 
-                if new_sample is None:
-                    if not X_batch:
-                        raise StopIteration("End of dataset reached and no full batches could be formed.")
-                    else:
-                        break
-                
-                data_buffer.extend(new_sample)
 
-            while len(data_buffer) >= (block_size + 1) and len(X_batch) < batch_size:
-                x = data_buffer[:block_size]
-                y = data_buffer[1:block_size+1]
+def main():
+    args = get_args()
 
-                X_batch.append(x)
-                Y_batch.append(y)
+    use_ddp = 'RANK' in os.environ and 'WORLD_SIZE' in os.environ
+    if use_ddp:
+        dist.init_process_group(backend='nccl')
+        local_rank = int(os.environ['LOCAL_RANK'])
+        global_rank = int(os.environ['RANK'])
+        torch.cuda.set_device(local_rank)
+        device = f'cuda:{local_rank}'
+        seed_offset = global_rank
+    else:
+        local_rank = 0
+        global_rank = 0
+        device = args.device
+        seed_offset = 0
 
-                data_buffer = data_buffer[1:]
+    seed_everything(args.seed + seed_offset)
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    device_type = 'cuda' if 'cuda' in device else 'cpu'
+    ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[args.dtype]
+    ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
-        x = torch.tensor(X_batch, dtype=torch.long)
-        y = torch.tensor(Y_batch, dtype=torch.long)
-
-        # Device will be set in the main function
-        return x, y
-
-# init these up here, can override if init_from='resume' (i.e. from a checkpoint)
-iter_num = 0
-best_val_loss = 1e9
-
-# attempt to derive vocab_size from the dataset
-if dataset != 'slim_pajama':
+    if global_rank == 0:
+        os.makedirs(args.out_dir, exist_ok=True)
+    
+    data_dir = os.path.join('data', args.dataset)
+    init_data_loader('train', data_dir, args.block_size)
+    
     meta_path = os.path.join(data_dir, 'meta.pkl')
     meta_vocab_size = None
     if os.path.exists(meta_path):
         with open(meta_path, 'rb') as f:
             meta = pickle.load(f)
         meta_vocab_size = meta['vocab_size']
-        print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
-else:
-    meta_vocab_size = 250221
-
-# model init
-model_args = dict(n_layer=n_layer, n_head=n_head, n_kv_head=n_kv_head, n_embd=n_embd, block_size=block_size,
-                  bias=bias, vocab_size=None, dropout=dropout, mup=mup, 
-                  mup_multiplier=mup_multiplier, init_std=init_std,
-                  impl=ptimpl, normalization=normalization, use_moe=use_moe, 
-                  num_experts=num_experts, router_topk=router_topk, 
-                  moe_ffn_hidden_size=moe_ffn_hidden_size, 
-                  moe_seq_aux_loss_coeff=moe_seq_aux_loss_coeff, 
-                  moe_ffn_mup_multiplier=moe_ffn_mup_multiplier,
-                  moe_random_router=moe_random_router) # start with model_args from command line
-
-# init a new model from scratch
-print("Initializing a new model from scratch")
-# determine the vocab size we'll use for from-scratch training
-if meta_vocab_size is None:
-    print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
-model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 50304
-print("MODEL ARGS:", model_args)
-gptconf = GPTConfig(**model_args)
-model = GPT(gptconf)
-
-
-
-import torch.distributed as dist
-import torch.multiprocessing as mp
-from torch.nn.parallel import DistributedDataParallel as DDP
-
-def main_worker(local_rank, world_size):
-    def print_mfu(model, fwdbwd_per_iter, dt):
-        try:
-            mfu = model.module.estimate_mfu(fwdbwd_per_iter, dt)
-            print(f"[GPU {local_rank}] MFU: {mfu:.4f}")
-        except Exception as e:
-            print(f"[GPU {local_rank}] MFU error: {e}")
-    
-    # Initialize distributed training
-    dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=local_rank)
-    torch.cuda.set_device(local_rank)
-    device = f'cuda:{local_rank}'
-    seed_everything(seed + local_rank)
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-    device_type = 'cuda'
-    ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
-    ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+        if global_rank == 0:
+            print(f"Found vocab_size = {meta_vocab_size} (inside {meta_path})")
 
     param_type = 'mup'
-    model = build_model(n_embd, param_type, device)
-    model = DDP(model, device_ids=[local_rank], output_device=local_rank)
-    optimizer = model.module.configure_optimizers(
-        weight_decay=weight_decay,
-        learning_rate=learning_rate,
-        betas=(beta1, beta2),
-        eps=eps,
-        device_type=device_type,
-        adaptive_optimizer=False
+    mup_multiplier = args.n_embd / 512.0
+
+    model_args = dict(
+        n_layer=args.n_layer, n_head=args.n_head, n_kv_head=args.n_kv_head, n_embd=args.n_embd,
+        block_size=args.block_size, bias=args.bias, vocab_size=meta_vocab_size or 50304,
+        dropout=args.dropout, mup=True, mup_multiplier=mup_multiplier, init_std=args.init_std,
+        impl=impl_dict['mengxi_impl'], normalization="LayerNorm", use_moe=args.use_moe,
+        num_experts=args.num_experts, router_topk=args.router_topk
     )
-    scaler = torch.amp.GradScaler('cuda', enabled=(dtype == 'float16'))
-    losses = []
-    optimizer.zero_grad(set_to_none=True)
-    import time
-    t0 = time.time()
-    for step in range(max_iters):
-        x, y = get_batch('train')
-        with ctx:
-            outputs = model(x, y)
-            if isinstance(outputs, tuple):
-                loss = outputs[1] if outputs[1] is not None else outputs[0]
-            else:
-                loss = outputs
-            loss = loss / gradient_accumulation_steps
-        scaler.scale(loss).backward()
-        if (step + 1) % gradient_accumulation_steps == 0:
-            if grad_clip != 0.0:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad(set_to_none=True)
-        losses.append(loss.item() * gradient_accumulation_steps)
-        # Print loss and MFU every 10 steps (only on rank 0)
-        if (step + 1) % 10 == 0 and local_rank == 0:
-            dt = time.time() - t0
-            print(f"[GPU {local_rank}] Step {step+1} | Loss: {loss.item() * gradient_accumulation_steps:.6f}")
-            print_mfu(model, gradient_accumulation_steps, dt)
-            t0 = time.time()
-    if local_rank == 0:
-        out_dir = f"mu_transfer_results/{param_type}/"
-        os.makedirs(out_dir, exist_ok=True)
-        pd.DataFrame({
-            'step': np.arange(max_iters),
-            'loss': losses,
-            'width': n_embd,
-            'log2lr': np.log2(learning_rate),
-            'param_type': param_type
-        }).to_csv(f"{out_dir}/width{n_embd}_log2lr{np.log2(learning_rate):.2f}.csv", index=False)
+    gptconf = GPTConfig(**model_args)
+    model = GPT(gptconf)
+    model.to(device)
 
+    if args.compile:
+        if global_rank == 0:
+            print("Compiling the model... (this may take a minute)")
+        model = torch.compile(model)
 
-def main():
-
-    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        # We're running under torchrun, use the existing distributed setup
-        local_rank = int(os.environ['LOCAL_RANK'])
-        world_size = int(os.environ['WORLD_SIZE'])
-        global_rank = int(os.environ['RANK'])
-        
-        # Initialize distributed training
-        dist.init_process_group(backend='nccl')
-        torch.cuda.set_device(local_rank)
-        device = f'cuda:{local_rank}'
-        use_ddp = False
-        
-        def print_mfu(model, fwdbwd_per_iter, dt):
-            try:
-                mfu = model.module.estimate_mfu(fwdbwd_per_iter, dt)
-                if global_rank == 0:
-                    print(f"[GPU {local_rank}] MFU: {mfu:.4f}")
-            except Exception as e:
-                if global_rank == 0:
-                    print(f"[GPU {local_rank}] MFU error: {e}")
-        
-        # Set up device and context
-        seed_everything(seed + global_rank)
-    else:
-        # Single GPU training
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        if device == 'cuda':
-            torch.cuda.set_device(0)
-        use_ddp = False
-        global_rank = 0
-        local_rank = 0
-        
-        def print_mfu(model, fwdbwd_per_iter, dt):
-            try:
-                if hasattr(model, 'module'):
-                    mfu = model.module.estimate_mfu(fwdbwd_per_iter, dt)
-                else:
-                    mfu = model.estimate_mfu(fwdbwd_per_iter, dt)
-                print(f"MFU: {mfu:.4f}")
-            except Exception as e:
-                print(f"MFU error: {e}")
-        
-        # Set up device and context
-        seed_everything(seed)
-    
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-    device_type = 'cuda' if 'cuda' in device else 'cpu'
-    ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
-    ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
-
-    param_type = 'mup'
-    model = build_model(n_embd, param_type, device)
-    
     if use_ddp:
-        model = DDP(model, device_ids=[local_rank], output_device=local_rank)
-    
+        model = DDP(model, device_ids=[local_rank])
+
     model_for_optimizer = model.module if use_ddp else model
     optimizer = model_for_optimizer.configure_optimizers(
-        weight_decay=weight_decay,
-        learning_rate=learning_rate,
-        betas=(beta1, beta2),
-        eps=eps,
-        device_type=device_type,
-        adaptive_optimizer=False
+        weight_decay=args.weight_decay, learning_rate=args.learning_rate,
+        betas=(args.beta1, args.beta2), eps=args.eps,
+        device_type=device_type, adaptive_optimizer=False
     )
-    scaler = torch.amp.GradScaler('cuda', enabled=(dtype == 'float16'))
+    scaler = torch.cuda.amp.GradScaler(enabled=(args.dtype == 'float16'))
+
     losses = []
-    optimizer.zero_grad(set_to_none=True)
-    
-    import time
     t0 = time.time()
-    for step in range(max_iters):
-        x, y = get_batch('train')
-   
-        if device_type == 'cuda':
-            x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
-        else:
-            x, y = x.to(device), y.to(device)
+    for step in range(args.max_iters):
+        x, y = get_batch('train', args.batch_size, args.block_size, device)
         
         with ctx:
             outputs = model(x, y)
-            if isinstance(outputs, tuple):
-                loss = outputs[1] if outputs[1] is not None else outputs[0]
-            else:
-                loss = outputs
-            loss = loss / gradient_accumulation_steps
+            loss = outputs[1] if isinstance(outputs, tuple) and outputs[1] is not None else outputs[0]
+            loss = loss / args.gradient_accumulation_steps
+        
         scaler.scale(loss).backward()
-        if (step + 1) % gradient_accumulation_steps == 0:
-            if grad_clip != 0.0:
+
+        if (step + 1) % args.gradient_accumulation_steps == 0:
+            if args.grad_clip > 0.0:
                 scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad(set_to_none=True)
-        losses.append(loss.item() * gradient_accumulation_steps)
 
         if (step + 1) % 10 == 0 and global_rank == 0:
+            loss_val = loss.item() * args.gradient_accumulation_steps
+            losses.append(loss_val)
             dt = time.time() - t0
-            print(f"Step {step+1} | Loss: {loss.item() * gradient_accumulation_steps:.6f}")
-            print_mfu(model, gradient_accumulation_steps, dt)
             t0 = time.time()
-    
+            
+            mfu = -1.0
+            if hasattr(model_for_optimizer, 'estimate_mfu'):
+                mfu = model_for_optimizer.estimate_mfu(args.gradient_accumulation_steps, dt)
+            
+            print(f"Step {step+1}/{args.max_iters} | Loss: {loss_val:.4f} | Time: {dt*1000:.2f}ms | MFU: {mfu*100:.2f}%")
+
+
     if global_rank == 0:
-        out_dir_full = f"{out_dir}/{param_type}/"
+        out_dir_full = os.path.join(args.out_dir, param_type)
         os.makedirs(out_dir_full, exist_ok=True)
-        pd.DataFrame({
-            'step': np.arange(max_iters),
+        
+        log_file_name = f"width{args.n_embd}_lr{args.learning_rate:.5f}_wd{args.weight_decay:.5f}_seed{args.seed}.csv"
+        
+        df = pd.DataFrame({
+            'step': np.arange(len(losses)) * 10,
             'loss': losses,
-            'width': n_embd,
-            'log2lr': np.log2(learning_rate),
+            'width': args.n_embd,
+            'lr': args.learning_rate,
+            'wd': args.weight_decay,
+            'seed': args.seed,
             'param_type': param_type
-        }).to_csv(f"{out_dir_full}/width{n_embd}_log2lr{np.log2(learning_rate):.2f}.csv", index=False)
-    
+        })
+        df.to_csv(os.path.join(out_dir_full, log_file_name), index=False)
+        print(f"Saved training log to {os.path.join(out_dir_full, log_file_name)}")
+
     if use_ddp:
         dist.destroy_process_group()
 
