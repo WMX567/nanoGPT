@@ -10,13 +10,12 @@ from datetime import datetime
 
 def generate_sh_scripts():
 
-    widths = [512, 1024, 2048]
+    widths = [512, 768, 1024, 2048]
     n_layers = 3
     n_kv_head = 4
-    n_heads_list = [4, 8, 16]
-    # 减少批次大小以避免OOM
-    batch_list = [6, 8, 12]  # 原来是 [12, 22, 42]
-    steps_list = [1160, 2356, 4754]
+    n_heads_list = [4, 6, 8, 16]
+    batch_list = [12, 17, 22, 42]
+    steps_list = [1160, 1715, 2356, 4754]
     
     # learning rates: 2^{-4} to 2^{-8}
     lrs = [0.06250, 0.03125, 0.01563, 0.00781, 0.00391]
@@ -58,9 +57,6 @@ def generate_sh_scripts():
                 eval "$(conda shell.bash hook)"
                 conda activate nanogpt
 
-                export CUDA_LAUNCH_BLOCKING=1
-                export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
-
                 width={width}
                 n_layers={n_layers}
                 n_kv_head={n_kv_head}
@@ -70,7 +66,6 @@ def generate_sh_scripts():
                 lr={lr:.5f}
                 wd={wd:.5f}
                 seed={seed}
-                grad_accum_steps={grad_accum_steps}
 
                 out_dir=mu_transfer_results/w${{width}}_h${{n_heads}}_lr${{lr}}_wd${{wd}}_s${{seed}}
                 mkdir -p ${{out_dir}}
@@ -87,7 +82,6 @@ def generate_sh_scripts():
                     --n_embd=${{width}} \\
                     --n_layer=${{n_layers}} \\
                     --n_head=${{n_heads}} \\
-                    --gradient_accumulation_steps=${{grad_accum_steps}} \\
                     --n_kv_head=${{n_kv_head}} \\
                     --batch_size=${{batch_size}} \\
                     --max_iters=${{steps}} \\

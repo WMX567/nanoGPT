@@ -5,21 +5,21 @@
                 #SBATCH --ntasks-per-node=1
                 #SBATCH --cpus-per-task=4
                 #SBATCH --mem=50G
-                #SBATCH --output=mu_transfer_w512_h4_lr0.01563_wd0.48250_s1.out
-                #SBATCH --job-name=mu_w512_s1
+                #SBATCH --output=mu_transfer_w768_h6_lr0.00781_wd0.96500_s2.out
+                #SBATCH --job-name=mu_w768_s2
 
                 eval "$(conda shell.bash hook)"
                 conda activate nanogpt
 
-                width=512
+                width=768
                 n_layers=3
                 n_kv_head=4
-                n_heads=4
-                batch_size=12
-                steps=1160
-                lr=0.01563
-                wd=0.48250
-                seed=1
+                n_heads=6
+                batch_size=17
+                steps=1715
+                lr=0.00781
+                wd=0.96500
+                seed=2
 
                 out_dir=mu_transfer_results/w${width}_h${n_heads}_lr${lr}_wd${wd}_s${seed}
                 mkdir -p ${out_dir}

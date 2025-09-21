@@ -4,6 +4,11 @@ sbatch mu_transfer_w512_h4_lr0.03125_wd0.24125_s0.sh
 sbatch mu_transfer_w512_h4_lr0.01563_wd0.48250_s0.sh
 sbatch mu_transfer_w512_h4_lr0.00781_wd0.96500_s0.sh
 sbatch mu_transfer_w512_h4_lr0.00391_wd1.92999_s0.sh
+sbatch mu_transfer_w768_h6_lr0.06250_wd0.12062_s0.sh
+sbatch mu_transfer_w768_h6_lr0.03125_wd0.24125_s0.sh
+sbatch mu_transfer_w768_h6_lr0.01563_wd0.48250_s0.sh
+sbatch mu_transfer_w768_h6_lr0.00781_wd0.96500_s0.sh
+sbatch mu_transfer_w768_h6_lr0.00391_wd1.92999_s0.sh
 sbatch mu_transfer_w1024_h8_lr0.06250_wd0.12062_s0.sh
 sbatch mu_transfer_w1024_h8_lr0.03125_wd0.24125_s0.sh
 sbatch mu_transfer_w1024_h8_lr0.01563_wd0.48250_s0.sh
@@ -19,6 +24,11 @@ sbatch mu_transfer_w512_h4_lr0.03125_wd0.24125_s1.sh
 sbatch mu_transfer_w512_h4_lr0.01563_wd0.48250_s1.sh
 sbatch mu_transfer_w512_h4_lr0.00781_wd0.96500_s1.sh
 sbatch mu_transfer_w512_h4_lr0.00391_wd1.92999_s1.sh
+sbatch mu_transfer_w768_h6_lr0.06250_wd0.12062_s1.sh
+sbatch mu_transfer_w768_h6_lr0.03125_wd0.24125_s1.sh
+sbatch mu_transfer_w768_h6_lr0.01563_wd0.48250_s1.sh
+sbatch mu_transfer_w768_h6_lr0.00781_wd0.96500_s1.sh
+sbatch mu_transfer_w768_h6_lr0.00391_wd1.92999_s1.sh
 sbatch mu_transfer_w1024_h8_lr0.06250_wd0.12062_s1.sh
 sbatch mu_transfer_w1024_h8_lr0.03125_wd0.24125_s1.sh
 sbatch mu_transfer_w1024_h8_lr0.01563_wd0.48250_s1.sh
@@ -34,6 +44,11 @@ sbatch mu_transfer_w512_h4_lr0.03125_wd0.24125_s2.sh
 sbatch mu_transfer_w512_h4_lr0.01563_wd0.48250_s2.sh
 sbatch mu_transfer_w512_h4_lr0.00781_wd0.96500_s2.sh
 sbatch mu_transfer_w512_h4_lr0.00391_wd1.92999_s2.sh
+sbatch mu_transfer_w768_h6_lr0.06250_wd0.12062_s2.sh
+sbatch mu_transfer_w768_h6_lr0.03125_wd0.24125_s2.sh
+sbatch mu_transfer_w768_h6_lr0.01563_wd0.48250_s2.sh
+sbatch mu_transfer_w768_h6_lr0.00781_wd0.96500_s2.sh
+sbatch mu_transfer_w768_h6_lr0.00391_wd1.92999_s2.sh
 sbatch mu_transfer_w1024_h8_lr0.06250_wd0.12062_s2.sh
 sbatch mu_transfer_w1024_h8_lr0.03125_wd0.24125_s2.sh
 sbatch mu_transfer_w1024_h8_lr0.01563_wd0.48250_s2.sh
@@ -45,4 +60,4 @@ sbatch mu_transfer_w2048_h16_lr0.01563_wd0.48250_s2.sh
 sbatch mu_transfer_w2048_h16_lr0.00781_wd0.96500_s2.sh
 sbatch mu_transfer_w2048_h16_lr0.00391_wd1.92999_s2.sh
 
-echo 'Submitted 45 jobs to SLURM'
+echo 'Submitted 60 jobs to SLURM'

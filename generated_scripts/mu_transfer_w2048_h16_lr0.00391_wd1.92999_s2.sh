@@ -11,19 +11,15 @@
                 eval "$(conda shell.bash hook)"
                 conda activate nanogpt
 
-                export CUDA_LAUNCH_BLOCKING=1
-                export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
-
                 width=2048
                 n_layers=3
                 n_kv_head=4
                 n_heads=16
-                batch_size=12
+                batch_size=42
                 steps=4754
                 lr=0.00391
                 wd=1.92999
                 seed=2
-                grad_accum_steps=40
 
                 out_dir=mu_transfer_results/w${width}_h${n_heads}_lr${lr}_wd${wd}_s${seed}
                 mkdir -p ${out_dir}
@@ -40,7 +36,6 @@
                     --n_embd=${width} \
                     --n_layer=${n_layers} \
                     --n_head=${n_heads} \
-                    --gradient_accumulation_steps=${grad_accum_steps} \
                     --n_kv_head=${n_kv_head} \
                     --batch_size=${batch_size} \
                     --max_iters=${steps} \
