@@ -12,7 +12,7 @@
 
                 width=768
                 n_layers=3
-                n_kv_head=4
+                n_kv_head=2
                 n_heads=6
                 batch_size=3
                 steps=1715
