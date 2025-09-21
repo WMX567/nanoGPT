@@ -4,7 +4,7 @@
                 #SBATCH --gres=gpu:1
                 #SBATCH --ntasks-per-node=1
                 #SBATCH --cpus-per-task=4
-                #SBATCH --mem=50G
+                #SBATCH --mem=128G
                 #SBATCH --output=mu_transfer_w768_h6_lr0.06250_wd0.12062_s1.out
 
                 eval "$(conda shell.bash hook)"
@@ -50,7 +50,7 @@
                     --grad_clip=1.0 \
                     --decay_lr=False \
                     --device='cuda' \
-                    --dtype='float32' \
+                    --dtype='bfloat16' \
                     --impl='mengxi_impl' \
                     --compile=False \
 
