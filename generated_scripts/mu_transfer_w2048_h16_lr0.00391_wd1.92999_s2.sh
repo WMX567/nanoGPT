@@ -4,6 +4,7 @@
                 #SBATCH --gres=gpu:1
                 #SBATCH --ntasks-per-node=1
                 #SBATCH --cpus-per-task=4
+                #SBATCH --mem=50G
                 #SBATCH --output=mu_transfer_w2048_h16_lr0.00391_wd1.92999_s2.out
                 #SBATCH --job-name=mu_w2048_s2
 

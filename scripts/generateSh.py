@@ -48,6 +48,7 @@ def generate_sh_scripts():
                 #SBATCH --gres=gpu:1
                 #SBATCH --ntasks-per-node=1
                 #SBATCH --cpus-per-task=4
+                #SBATCH --mem=50G
                 #SBATCH --output=mu_transfer_w{width}_h{n_heads}_lr{lr:.5f}_wd{wd:.5f}_s{seed}.out
                 #SBATCH --job-name=mu_w{width}_s{seed}
 
