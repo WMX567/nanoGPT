@@ -281,53 +281,26 @@ def plot_data(df: pd.DataFrame, x: str, y: str, hue: str = None, style: str = No
     plt.show()
 
 def read_coord_check_data(folder_path: str) -> pd.DataFrame:
-    """Read coordinate check data from a folder containing pickle files."""
+    """Read coordinate check data from a folder containing CSV files."""
     folder = Path(folder_path)
     if not folder.exists():
         raise ValueError(f"Folder {folder_path} does not exist")
-    
+
     all_dataframes = []
-    
-    # Look for pickle files in the folder
-    for pickle_file in folder.glob("*.pkl"):
+
+    # Look for CSV files in the folder
+    for csv_file in folder.glob("*.csv"):
         try:
-            with open(pickle_file, 'rb') as f:
-                data = pickle.load(f)
-                if isinstance(data, pd.DataFrame):
-                    all_dataframes.append(data)
-                elif isinstance(data, dict):
-                    # If it's raw data dictionary, convert to DataFrame
-                    # Extract metadata from filename if possible
-                    filename = pickle_file.stem
-                    parts = filename.split('_')
-                    width = 768  # default
-                    seed = 0    # default
-                    depth = 3   # default
-                    tag = 'default'
-                    
-                    # Try to extract parameters from filename
-                    for part in parts:
-                        if 'emb' in part:
-                            try:
-                                width = int(part.replace('emb', ''))
-                            except:
-                                pass
-                        elif 'seed' in part:
-                            try:
-                                seed = int(part.replace('seed', ''))
-                            except:
-                                pass
-                    
-                    df = dataframe_from_data(data, width, seed, depth, tag)
-                    all_dataframes.append(df)
+            df = pd.read_csv(csv_file)
+            all_dataframes.append(df)
         except Exception as e:
-            print(f"Error reading {pickle_file}: {e}")
+            print(f"Error reading {csv_file}: {e}")
             continue
-    
+
     if not all_dataframes:
         print(f"No valid data found in {folder_path}")
         return pd.DataFrame()
-    
+
     # Combine all dataframes
     combined_df = pd.concat(all_dataframes, ignore_index=True)
     return combined_df
@@ -428,7 +401,7 @@ def plot_coord_check_results(df: pd.DataFrame, save_path: str = None):
     
     plt.show()
 
-def analyze_folder(folder_path: str = "2025-09-18_12-32-01"):
+def analyze_folder(folder_path: str = "2025-09-20_18-36-08"):
     """Complete analysis pipeline: read data and create plots."""
     print(f"Reading data from folder: {folder_path}")
     
@@ -469,4 +442,4 @@ def analyze_folder(folder_path: str = "2025-09-18_12-32-01"):
     return df
 
 # Example usage:
-# df = analyze_folder("2025-09-18_12-32-01")
+df = analyze_folder("2025-09-20_18-36-08")
