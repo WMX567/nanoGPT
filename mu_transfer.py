@@ -268,7 +268,7 @@ def main_worker(local_rank, world_size):
         device_type=device_type,
         adaptive_optimizer=False
     )
-    scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
+    scaler = torch.amp.GradScaler('cuda', enabled=(dtype == 'float16'))
     losses = []
     optimizer.zero_grad(set_to_none=True)
     import time
