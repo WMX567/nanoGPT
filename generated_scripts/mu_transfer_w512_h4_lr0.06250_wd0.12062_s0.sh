@@ -14,7 +14,7 @@
                 n_layers=3
                 n_kv_head=4
                 n_heads=4
-                batch_size=12
+                batch_size=3
                 steps=1160
                 lr=0.06250
                 wd=0.12062

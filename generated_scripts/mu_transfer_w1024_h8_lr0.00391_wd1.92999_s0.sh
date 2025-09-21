@@ -14,7 +14,7 @@
                 n_layers=3
                 n_kv_head=4
                 n_heads=8
-                batch_size=22
+                batch_size=3
                 steps=2356
                 lr=0.00391
                 wd=1.92999
