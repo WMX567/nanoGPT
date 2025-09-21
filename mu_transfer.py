@@ -114,7 +114,7 @@ def main():
     seed_everything(args.seed + seed_offset)
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
-    device_type = 'cuda' if 'cuda' in device else 'cpu'
+    device_type = 'cuda' if torch.cuda.is_available() else 'cpu'
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[args.dtype]
     ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
