@@ -30,7 +30,7 @@
                 echo "grad_accum_steps: ${grad_accum_steps}"
                 echo "output_dir: ${out_dir}"
 
-                python mu_transfer.py \
+                python /scratch1/mengxiwu/nanoGPT/mu_transfer.py \
                 --out_dir=${out_dir} \
                 --n_embd=${width}                 --n_layer=${n_layers}                 --n_head=${n_heads}                 --n_kv_head=${n_kv_head}                 --batch_size=${batch_size}                 --max_iters=${steps}                 --learning_rate=${lr}                 --weight_decay=${wd}                 --seed=${seed}                 --block_size=1024                 --dropout=0.0                 --bias=False                 --init_std=0.02                 --beta1=0.9                 --beta2=0.95                 --grad_clip=1.0                 --decay_lr=False                 --device='cuda:0'                 --dtype='bfloat16'                 --compile=False
 

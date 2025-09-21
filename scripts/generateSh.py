@@ -76,7 +76,7 @@ def generate_sh_scripts():
                 echo "grad_accum_steps: ${{grad_accum_steps}}"
                 echo "output_dir: ${{out_dir}}"
 
-                python mu_transfer.py \\
+                python /scratch1/mengxiwu/nanoGPT/mu_transfer.py \\
                 --out_dir=${{out_dir}} \\
                 --n_embd=${{width}} \
                 --n_layer=${{n_layers}} \
