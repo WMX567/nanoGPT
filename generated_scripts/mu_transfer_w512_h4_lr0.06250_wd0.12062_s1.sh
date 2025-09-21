@@ -6,7 +6,6 @@
                 #SBATCH --cpus-per-task=4
                 #SBATCH --mem=50G
                 #SBATCH --output=mu_transfer_w512_h4_lr0.06250_wd0.12062_s1.out
-                #SBATCH --job-name=mu_w512_s1
 
                 eval "$(conda shell.bash hook)"
                 conda activate nanogpt
@@ -50,9 +49,10 @@
                     --beta2=0.95 \
                     --grad_clip=1.0 \
                     --decay_lr=False \
-                    --device='cuda:0' \
-                    --dtype='bfloat16' \
-                    --compile=False
+                    --device='cuda' \
+                    --dtype='float32' \
+                    --impl='mengxi_impl' \
+                    --compile=False \
 
                 echo "Training completed for w${width}_h${n_heads}_lr${lr}_wd${wd}_s${seed}"
                 
