@@ -14,7 +14,8 @@ def generate_sh_scripts():
     n_layers = 3
     n_kv_head = 4
     n_heads_list = [4, 8, 16]
-    batch_list = [12, 22, 42]
+    # 减少批次大小以避免OOM
+    batch_list = [6, 8, 12]  # 原来是 [12, 22, 42]
     steps_list = [1160, 2356, 4754]
     
     # learning rates: 2^{-4} to 2^{-8}
@@ -39,12 +40,14 @@ def generate_sh_scripts():
                 script_name = f"mu_transfer_w{width}_h{n_heads}_lr{lr:.5f}_wd{wd:.5f}_s{seed}.sh"
                 script_path = os.path.join(output_dir, script_name)
 
-                # 计算 gradient accumulation steps
-                grad_accum_steps = 5 * 8 // (batch_size // 12)
+                # 计算 gradient accumulation steps - 增加以保持总的effective batch size
+                base_batch = 12
+                effective_batch_multiplier = 5 * 8  # 40
+                grad_accum_steps = max(1, effective_batch_multiplier * base_batch // batch_size)
 
                 script_content = f"""#!/bin/bash
                 #SBATCH --partition=gpu
-                #SBATCH --time=08:00:00
+                #SBATCH --time=12:00:00
                 #SBATCH --gres=gpu:1
                 #SBATCH --ntasks-per-node=1
                 #SBATCH --cpus-per-task=4
@@ -55,7 +58,9 @@ def generate_sh_scripts():
                 eval "$(conda shell.bash hook)"
                 conda activate nanogpt
 
-                # 参数设置
+                export CUDA_LAUNCH_BLOCKING=1
+                export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+
                 width={width}
                 n_layers={n_layers}
                 n_kv_head={n_kv_head}
@@ -123,30 +128,6 @@ def generate_sh_scripts():
 
         f.write(f"\necho 'Submitted {script_count} jobs to SLURM'\n")
     
-    # os.chmod(submit_all_script, 0o755)
-    
-    # stats_script = os.path.join(output_dir, "job_stats.sh")
-    # with open(stats_script, 'w') as f:
-    #     f.write("""#!/bin/bash
-    #     echo "Job Status Summary:"
-    #     squeue -u $USER | grep mu_ | awk '{print $5}' | sort | uniq -c
-    #     echo ""
-    #     echo "Total jobs in queue:"
-    #     squeue -u $USER | grep mu_ | wc -l
-    #     echo ""
-    #     echo "Running jobs:"
-    #     squeue -u $USER | grep mu_ | grep " R " | wc -l
-    #     echo ""
-    #     echo "Pending jobs:"
-    #     squeue -u $USER | grep mu_ | grep " PD " | wc -l
-    #     """)
-    
-    # os.chmod(stats_script, 0o755)
-    
-    # print(f"\n总共生成了 {script_count} 个脚本文件")
-    # print(f"脚本保存在: {output_dir}")
-    # print(f"使用 'bash {submit_all_script}' 批量提交所有作业")
-    # print(f"使用 'bash {stats_script}' 查看作业状态")
 
 if __name__ == "__main__":
     generate_sh_scripts()

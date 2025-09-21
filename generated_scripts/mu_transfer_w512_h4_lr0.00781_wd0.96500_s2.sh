@@ -1,6 +1,6 @@
 #!/bin/bash
                 #SBATCH --partition=gpu
-                #SBATCH --time=08:00:00
+                #SBATCH --time=12:00:00
                 #SBATCH --gres=gpu:1
                 #SBATCH --ntasks-per-node=1
                 #SBATCH --cpus-per-task=4
@@ -11,17 +11,19 @@
                 eval "$(conda shell.bash hook)"
                 conda activate nanogpt
 
-                # 参数设置
+                export CUDA_LAUNCH_BLOCKING=1
+                export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+
                 width=512
                 n_layers=3
                 n_kv_head=4
                 n_heads=4
-                batch_size=12
+                batch_size=6
                 steps=1160
                 lr=0.00781
                 wd=0.96500
                 seed=2
-                grad_accum_steps=40
+                grad_accum_steps=80
 
                 out_dir=mu_transfer_results/w${width}_h${n_heads}_lr${lr}_wd${wd}_s${seed}
                 mkdir -p ${out_dir}
