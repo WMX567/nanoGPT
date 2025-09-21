@@ -49,7 +49,7 @@ def get_args():
 
     parser.add_argument('--device', type=str, default='cuda', help='Device to use (e.g., cpu, cuda, cuda:0).')
     parser.add_argument('--dtype', type=str, default='bfloat16', choices=['float32', 'bfloat16', 'float16'], help='Data type for training.')
-    parser.add_argument('--compile', action='store_false', help='Disable PyTorch 2.0 model compilation.')
+    parser.add_argument('--compile', type=bool, default=False, help='Disable PyTorch 2.0 model compilation.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed.')
     
     parser.add_argument('--use_moe', action='store_true', help='Enable Mixture of Experts.')
