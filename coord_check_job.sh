@@ -14,50 +14,64 @@ out_dir=coord-check-impl/${now}
 mkdir -p ${out_dir}
 
 
-embeds=(192,32 384,64 768,128 1536,256)
+
+
+# Fixed sweep table: Width Depth Heads HeadSize KV_Heads KV_Reps
+
+widths=(512 768 1024 1536 2048 3072 4096)
+depths=(3 3 3 3 3 3 3)
+heads=(4 6 8 12 16 24 32)
+kv_heads=(4 3 4 4 8 8 8)
+kv_reps=(1 2 2 3 2 3 4)
+head_sizes=(64 128 256)
+
 for seed in {0..3}; do
-    for embed_pair in "${embeds[@]}"; do
-        emb=$(echo $embed_pair | cut -d',' -f1)
-        head_size=$(echo $embed_pair | cut -d',' -f2)
-        mup_multiplier=$((emb / 192))
-        n_heads=6 #$((emb / head_size ))
-        n_kv_heads=6
-        # n_kv_heads is random number between 2 and n_heads
-        # n_kv_heads=$(( RANDOM % (n_heads - 1) + 2 ))
-        echo "mup_muliplier: ${mup_multiplier}, n_heads: ${n_heads}, emb: ${emb}, seed: ${seed}"
-        srun python coord_check.py \
-            --out_dir=${out_dir} \
-            --eval_interval=10000000 \
-            --log_interval=10000000 \
-            --eval_iters=1 \
-            --eval_only=False \
-            --init_from='scratch' \
-            --wandb_log=False \
-            --dataset='openwebtext' \
-            --gradient_accumulation_steps=1 \
-            --batch_size=1 \
-            --block_size=1024 \
-            --n_layer=3 \
-            --n_head=${n_heads} \
-            --n_kv_head=${n_kv_heads} \
-            --n_embd=${emb} \
-            --dropout=0.0 \
-            --bias=False \
-            --init_std=0.02 \
-            --learning_rate=4e-5 \
-            --max_iters=4 \
-            --weight_decay=0.0 \
-            --beta1=0.9 \
-            --beta2=0.95 \
-            --grad_clip=1.0 \
-            --decay_lr=False \
-            --mup=True \
-            --mup_multiplier=${mup_multiplier} \
-            --seed=${seed} \
-            --backend='nccl' \
-            --device='cuda' \
-            --dtype='float32' \
-            --compile=False \
-            --impl='mengxi_impl'
+    for i in ${!widths[@]}; do
+        emb=${widths[$i]}
+        n_layer=${depths[$i]}
+        n_heads=${heads[$i]}
+        n_kv_heads=${kv_heads[$i]}
+        kv_rep=${kv_reps[$i]}
+        mup_multiplier=$((emb / 128))
+        for head_size in "${head_sizes[@]}"; do
+            # Only valid if emb == n_heads * head_size
+            if (( emb != n_heads * head_size )); then continue; fi
+            echo "mup_muliplier: ${mup_multiplier}, n_heads: ${n_heads}, n_kv_heads: ${n_kv_heads}, emb: ${emb}, n_layer: ${n_layer}, head_size: ${head_size}, seed: ${seed}"
+            srun python coord_check.py \
+                --out_dir=${out_dir} \
+                --eval_interval=10000000 \
+                --log_interval=10000000 \
+                --eval_iters=1 \
+                --eval_only=False \
+                --init_from='scratch' \
+                --wandb_log=False \
+                --dataset='openwebtext' \
+                --gradient_accumulation_steps=1 \
+                --batch_size=1 \
+                --block_size=1024 \
+                --n_layer=${n_layer} \
+                --n_head=${n_heads} \
+                --n_kv_head=${n_kv_heads} \
+                --n_embd=${emb} \
+                --dropout=0.0 \
+                --bias=False \
+                --init_std=0.02 \
+                --learning_rate=4e-5 \
+                --max_iters=4 \
+                --weight_decay=0.0 \
+                --beta1=0.9 \
+                --beta2=0.95 \
+                --grad_clip=1.0 \
+                --decay_lr=False \
+                --mup=True \
+                --mup_multiplier=${mup_multiplier} \
+                --seed=${seed} \
+                --backend='nccl' \
+                --device='cuda' \
+                --dtype='float32' \
+                --compile=False \
+                --impl='mengxi_impl' \
+                --head_size=${head_size}
+        done
     done
 done
