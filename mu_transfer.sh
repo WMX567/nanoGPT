@@ -9,10 +9,6 @@
 eval "$(conda shell.bash hook)"
 conda activate nanogpt
 
-# show rich per-rank traces
-export TORCH_SHOW_CPP_STACKTRACES=1
-export TORCH_DISTRIBUTED_DEBUG=DETAIL   # or INFO
-
 now=$(date +%Y-%m-%d_%H-%M-%S)
 out_dir=mu_transfer_results/${now}
 mkdir -p ${out_dir}
