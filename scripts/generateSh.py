@@ -6,7 +6,7 @@ def generate_sh_scripts():
 
     widths = [512, 768, 1024, 2048]
     n_layers = 3
-    n_kv_head = 4
+    n_kv_head = 2
     n_heads_list = [4, 6, 8, 16]
     batch_list = [3, 3, 3, 3]
     steps_list = [1160, 1715, 2356, 4754]
