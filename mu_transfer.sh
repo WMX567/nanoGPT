@@ -36,7 +36,7 @@ for seed in {0..3}; do
     for lr in ${lrs[@]}; do
         for wd in ${weight_decays[@]}; do
             echo "width: ${width}, n_heads: ${n_heads}, n_kv_head: ${n_kv_head}, lr: ${lr}, wd: ${wd}, seed: ${seed}"
-            torchrun --nproc_per_node=2 mu_transfer.py \
+            TORCH_DISTRIBUTED_DEBUG=DETAIL torchrun --nproc_per_node=2 mu_transfer.py \
             --out_dir=${out_dir} \
             --n_embd=${width} \
             --n_layer=${n_layers} \
