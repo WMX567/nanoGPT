@@ -45,8 +45,14 @@
                 --seed=${seed} \
                 --block_size=1024 \
                 --dropout=0.0 \
-                --bias=False \
-                --init_std=0.02                 --beta1=0.9                 --beta2=0.95                 --grad_clip=1.0                 --decay_lr=False                 --device='cuda:0'                 --dtype='bfloat16'                 --compile=False
+                --init_std=0.02 \
+                --beta1=0.9 \
+                --beta2=0.95 \
+                --grad_clip=1.0 \
+                --decay_lr=False \
+                --device='cuda:0' \
+                --dtype='bfloat16' \
+                --compile=False
 
                 echo "Training completed for w${width}_h${n_heads}_lr${lr}_wd${wd}_s${seed}"
                 
