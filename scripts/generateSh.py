@@ -39,6 +39,9 @@ def generate_sh_scripts():
                 script_name = f"mu_transfer_w{width}_h{n_heads}_lr{lr:.5f}_wd{wd:.5f}_s{seed}.sh"
                 script_path = os.path.join(output_dir, script_name)
 
+                # 计算 gradient accumulation steps
+                grad_accum_steps = 5 * 8 // (batch_size // 12)
+
                 script_content = f"""#!/bin/bash
                 #SBATCH --partition=gpu
                 #SBATCH --time=08:00:00
@@ -61,6 +64,7 @@ def generate_sh_scripts():
                 lr={lr:.5f}
                 wd={wd:.5f}
                 seed={seed}
+                grad_accum_steps={grad_accum_steps}
 
                 out_dir=mu_transfer_results/w${{width}}_h${{n_heads}}_lr${{lr}}_wd${{wd}}_s${{seed}}
                 mkdir -p ${{out_dir}}
@@ -69,6 +73,7 @@ def generate_sh_scripts():
                 echo "width: ${{width}}, n_heads: ${{n_heads}}, n_kv_head: ${{n_kv_head}}"
                 echo "lr: ${{lr}}, wd: ${{wd}}, seed: ${{seed}}"
                 echo "batch_size: ${{batch_size}}, steps: ${{steps}}"
+                echo "grad_accum_steps: ${{grad_accum_steps}}"
                 echo "output_dir: ${{out_dir}}"
 
                 python /scratch1/mengxiwu/nanoGPT/mu_transfer.py \\
@@ -76,7 +81,7 @@ def generate_sh_scripts():
                     --n_embd=${{width}} \\
                     --n_layer=${{n_layers}} \\
                     --n_head=${{n_heads}} \\
-                    --gradient_accumulation_steps=${{5 * 8 // (batch_size//12)}} \\
+                    --gradient_accumulation_steps=${{grad_accum_steps}} \\
                     --n_kv_head=${{n_kv_head}} \\
                     --batch_size=${{batch_size}} \\
                     --max_iters=${{steps}} \\

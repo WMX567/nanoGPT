@@ -20,6 +20,7 @@
                 lr=0.00781
                 wd=0.96500
                 seed=0
+                grad_accum_steps=40
 
                 out_dir=mu_transfer_results/w${width}_h${n_heads}_lr${lr}_wd${wd}_s${seed}
                 mkdir -p ${out_dir}
@@ -28,6 +29,7 @@
                 echo "width: ${width}, n_heads: ${n_heads}, n_kv_head: ${n_kv_head}"
                 echo "lr: ${lr}, wd: ${wd}, seed: ${seed}"
                 echo "batch_size: ${batch_size}, steps: ${steps}"
+                echo "grad_accum_steps: ${grad_accum_steps}"
                 echo "output_dir: ${out_dir}"
 
                 python /scratch1/mengxiwu/nanoGPT/mu_transfer.py \
@@ -35,7 +37,7 @@
                     --n_embd=${width} \
                     --n_layer=${n_layers} \
                     --n_head=${n_heads} \
-                    --gradient_accumulation_steps=${5 * 8 // (batch_size//12)} \
+                    --gradient_accumulation_steps=${grad_accum_steps} \
                     --n_kv_head=${n_kv_head} \
                     --batch_size=${batch_size} \
                     --max_iters=${steps} \
