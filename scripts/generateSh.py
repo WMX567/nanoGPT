@@ -39,18 +39,12 @@ def generate_sh_scripts():
                 script_name = f"mu_transfer_w{width}_h{n_heads}_lr{lr:.5f}_wd{wd:.5f}_s{seed}.sh"
                 script_path = os.path.join(output_dir, script_name)
 
-                # 计算 gradient accumulation steps - 增加以保持总的effective batch size
-                base_batch = 12
-                effective_batch_multiplier = 5 * 8  # 40
-                grad_accum_steps = max(1, effective_batch_multiplier * base_batch // batch_size)
-
                 script_content = f"""#!/bin/bash
                 #SBATCH --partition=gpu
                 #SBATCH --time=12:00:00
                 #SBATCH --gres=gpu:1
                 #SBATCH --ntasks-per-node=1
                 #SBATCH --cpus-per-task=4
-                #SBATCH --mem=50G
                 #SBATCH --output=mu_transfer_w{width}_h{n_heads}_lr{lr:.5f}_wd{wd:.5f}_s{seed}.out
 
                 eval "$(conda shell.bash hook)"
