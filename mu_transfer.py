@@ -32,7 +32,7 @@ def get_args():
     parser.add_argument('--n_embd', type=int, default=768, help='Embedding dimension (model width).')
     parser.add_argument('--block_size', type=int, default=1024, help='Sequence length.')
     parser.add_argument('--dropout', type=float, default=0.0, help='Dropout rate.')
-    parser.add_argument('--bias', action='store_true', help='Use bias in Linear and LayerNorm layers.')
+    parser.add_argument('--bias', type=bool, default=False, help='Use bias in Linear and LayerNorm layers.')
     parser.add_argument('--init_std', type=float, default=0.02, help='Initialization standard deviation for muP.')
 
     parser.add_argument('--batch_size', type=int, default=12, help='Micro-batch size.')
@@ -45,7 +45,7 @@ def get_args():
     parser.add_argument('--beta2', type=float, default=0.95, help='AdamW beta2.')
     parser.add_argument('--eps', type=float, default=1e-8, help='AdamW epsilon.')
     parser.add_argument('--grad_clip', type=float, default=1.0, help='Gradient clipping value.')
-    parser.add_argument('--decay_lr', action='store_false', help='Disable learning rate decay.')
+    parser.add_argument('--decay_lr', type=bool, default=False, help='Disable learning rate decay.')
 
     parser.add_argument('--device', type=str, default='cuda', help='Device to use (e.g., cpu, cuda, cuda:0).')
     parser.add_argument('--dtype', type=str, default='bfloat16', choices=['float32', 'bfloat16', 'float16'], help='Data type for training.')
