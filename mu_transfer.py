@@ -6,7 +6,6 @@ import numpy as np
 import pickle
 import random
 import torch
-import sys
 
 from contextlib import nullcontext
 from megatron.core.datasets.indexed_dataset import IndexedDataset
@@ -15,10 +14,6 @@ from model_moe_kyle import GPTConfig, GPT
 from mup_implementations import (
     impl_dict
 )
-
-# 确保输出能够及时刷新
-sys.stdout.flush()
-sys.stderr.flush()
 
 def build_model(width, param_type, device):
     # param_type: 'sp' or 'mup'
@@ -307,14 +302,6 @@ def main_worker(local_rank, world_size):
 
 
 def main():
-    print("=== MU TRANSFER TRAINING STARTING ===")
-    print(f"Python version: {sys.version}")
-    print(f"PyTorch version: {torch.__version__}")
-    print(f"CUDA available: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print(f"CUDA device count: {torch.cuda.device_count()}")
-        print(f"Current CUDA device: {torch.cuda.current_device()}")
-    sys.stdout.flush()
 
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
         # We're running under torchrun, use the existing distributed setup
@@ -326,7 +313,7 @@ def main():
         dist.init_process_group(backend='nccl')
         torch.cuda.set_device(local_rank)
         device = f'cuda:{local_rank}'
-        use_ddp = True
+        use_ddp = False
         
         def print_mfu(model, fwdbwd_per_iter, dt):
             try:
@@ -368,21 +355,12 @@ def main():
     ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
     param_type = 'mup'
-    print(f"Building model with n_embd={n_embd}, param_type={param_type}")
-    sys.stdout.flush()
     model = build_model(n_embd, param_type, device)
-    print(f"Model built successfully. Device: {device}")
-    sys.stdout.flush()
     
     if use_ddp:
-        print("Wrapping model with DDP")
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
-        print("DDP wrapping completed")
-        sys.stdout.flush()
     
     model_for_optimizer = model.module if use_ddp else model
-    print("Configuring optimizer...")
-    sys.stdout.flush()
     optimizer = model_for_optimizer.configure_optimizers(
         weight_decay=weight_decay,
         learning_rate=learning_rate,
@@ -391,16 +369,9 @@ def main():
         device_type=device_type,
         adaptive_optimizer=False
     )
-    print("Optimizer configured successfully")
-    sys.stdout.flush()
-    
     scaler = torch.amp.GradScaler('cuda', enabled=(dtype == 'float16'))
     losses = []
     optimizer.zero_grad(set_to_none=True)
-    
-    print(f"Starting training loop for {max_iters} iterations...")
-    print(f"Batch size: {batch_size}, Gradient accumulation steps: {gradient_accumulation_steps}")
-    sys.stdout.flush()
     
     import time
     t0 = time.time()
@@ -429,59 +400,22 @@ def main():
             optimizer.zero_grad(set_to_none=True)
         losses.append(loss.item() * gradient_accumulation_steps)
 
-        # Print loss every 5 steps instead of 10 for more frequent output
-        if (step + 1) % 5 == 0 and global_rank == 0:
+        if (step + 1) % 10 == 0 and global_rank == 0:
             dt = time.time() - t0
-            current_loss = loss.item() * gradient_accumulation_steps
-            print(f"Step {step+1}/{max_iters} | Loss: {current_loss:.6f} | Time: {dt:.2f}s")
-            sys.stdout.flush()
+            print(f"Step {step+1} | Loss: {loss.item() * gradient_accumulation_steps:.6f}")
             print_mfu(model, gradient_accumulation_steps, dt)
             t0 = time.time()
-        
-        # Also print every 50 steps for less frequent but more detailed info
-        if (step + 1) % 50 == 0 and global_rank == 0:
-            avg_loss = np.mean(losses[-50:]) if len(losses) >= 50 else np.mean(losses)
-            print(f"=== Step {step+1} Summary ===")
-            print(f"Current loss: {current_loss:.6f}")
-            print(f"Average loss (last 50): {avg_loss:.6f}")
-            print(f"Progress: {(step+1)/max_iters*100:.1f}%")
-            sys.stdout.flush()
     
     if global_rank == 0:
-        print("Training completed! Saving results...")
-        sys.stdout.flush()
         out_dir_full = f"{out_dir}/{param_type}/"
         os.makedirs(out_dir_full, exist_ok=True)
-        
-        results_df = pd.DataFrame({
+        pd.DataFrame({
             'step': np.arange(max_iters),
             'loss': losses,
             'width': n_embd,
             'log2lr': np.log2(learning_rate),
             'param_type': param_type
-        })
-        
-        csv_path = f"{out_dir_full}/width{n_embd}_log2lr{np.log2(learning_rate):.2f}.csv"
-        results_df.to_csv(csv_path, index=False)
-        print(f"Results saved to: {csv_path}")
-        
-        # 也保存一个简单的总结
-        summary_path = f"{out_dir_full}/training_summary.txt"
-        with open(summary_path, 'w') as f:
-            f.write(f"Training Summary\n")
-            f.write(f"===============\n")
-            f.write(f"Model width: {n_embd}\n")
-            f.write(f"Learning rate: {learning_rate}\n")
-            f.write(f"Weight decay: {weight_decay}\n")
-            f.write(f"Batch size: {batch_size}\n")
-            f.write(f"Gradient accumulation steps: {gradient_accumulation_steps}\n")
-            f.write(f"Total steps: {max_iters}\n")
-            f.write(f"Final loss: {losses[-1]:.6f}\n")
-            f.write(f"Average loss: {np.mean(losses):.6f}\n")
-            f.write(f"Min loss: {np.min(losses):.6f}\n")
-        
-        print(f"Training summary saved to: {summary_path}")
-        sys.stdout.flush()
+        }).to_csv(f"{out_dir_full}/width{n_embd}_log2lr{np.log2(learning_rate):.2f}.csv", index=False)
     
     if use_ddp:
         dist.destroy_process_group()
