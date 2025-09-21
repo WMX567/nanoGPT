@@ -1,6 +1,4 @@
-#import os
-import itertools
-from datetime import datetime
+import os
 
 def generate_sh_scripts():
 
