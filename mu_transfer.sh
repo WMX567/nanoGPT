@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:2
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --output=mu_transfer_%j.out
+#SBATCH --output=mu_transfer.out
 
 eval "$(conda shell.bash hook)"
 conda activate nanogpt
