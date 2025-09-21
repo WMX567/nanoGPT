@@ -121,7 +121,7 @@ def main():
     if global_rank == 0:
         os.makedirs(args.out_dir, exist_ok=True)
     
-    data_dir = os.path.join('data', args.dataset)
+    data_dir = os.path.join('/scratch1/mengxiwu/nanoGPT/data', args.dataset)
     init_data_loader('train', data_dir, args.block_size)
     
     meta_path = os.path.join(data_dir, 'meta.pkl')
