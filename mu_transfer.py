@@ -242,6 +242,12 @@ import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 def main_worker(local_rank, world_size):
+    def print_mfu(model, fwdbwd_per_iter, dt):
+        try:
+            mfu = model.module.estimate_mfu(fwdbwd_per_iter, dt)
+            print(f"[GPU {local_rank}] MFU: {mfu:.4f}")
+        except Exception as e:
+            print(f"[GPU {local_rank}] MFU error: {e}")
     dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=local_rank)
     torch.cuda.set_device(local_rank)
     device = f'cuda:{local_rank}'
@@ -266,6 +272,8 @@ def main_worker(local_rank, world_size):
     scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
     losses = []
     optimizer.zero_grad(set_to_none=True)
+    import time
+    t0 = time.time()
     for step in range(max_iters):
         x, y = get_batch('train')
         with ctx:
@@ -284,6 +292,12 @@ def main_worker(local_rank, world_size):
             scaler.update()
             optimizer.zero_grad(set_to_none=True)
         losses.append(loss.item() * gradient_accumulation_steps)
+        # Print loss and MFU every 10 steps (only on rank 0)
+        if (step + 1) % 10 == 0 and local_rank == 0:
+            dt = time.time() - t0
+            print(f"[GPU {local_rank}] Step {step+1} | Loss: {loss.item() * gradient_accumulation_steps:.6f}")
+            print_mfu(model, gradient_accumulation_steps, dt)
+            t0 = time.time()
     if local_rank == 0:
         out_dir = f"mu_transfer_results/{param_type}/"
         os.makedirs(out_dir, exist_ok=True)
