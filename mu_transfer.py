@@ -300,8 +300,10 @@ def main_worker(local_rank, world_size):
             'log2lr': np.log2(learning_rate),
             'param_type': param_type
         }).to_csv(f"{out_dir}/width{n_embd}_log2lr{np.log2(learning_rate):.2f}.csv", index=False)
+
+
 def main():
-    # Check if we're running under torchrun (distributed environment already set up)
+
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
         # We're running under torchrun, use the existing distributed setup
         local_rank = int(os.environ['LOCAL_RANK'])
@@ -376,7 +378,7 @@ def main():
     t0 = time.time()
     for step in range(max_iters):
         x, y = get_batch('train')
-        # Move data to device
+   
         if device_type == 'cuda':
             x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
         else:
@@ -398,7 +400,7 @@ def main():
             scaler.update()
             optimizer.zero_grad(set_to_none=True)
         losses.append(loss.item() * gradient_accumulation_steps)
-        # Print loss and MFU every 10 steps (only on rank 0)
+
         if (step + 1) % 10 == 0 and global_rank == 0:
             dt = time.time() - t0
             print(f"Step {step+1} | Loss: {loss.item() * gradient_accumulation_steps:.6f}")
@@ -418,10 +420,6 @@ def main():
     
     if use_ddp:
         dist.destroy_process_group()
-    else:
-        # Fallback to mp.spawn for backwards compatibility
-        world_size = int(os.environ.get("WORLD_SIZE", 2))
-        mp.spawn(main_worker, args=(world_size,), nprocs=world_size)
 
 if __name__ == "__main__":
     main()

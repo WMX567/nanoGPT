@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=gpu
 #SBATCH --time=20:00:00
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
 #SBATCH --output=mu_transfer.out
@@ -17,7 +17,7 @@ width=512
 n_layers=3
 n_kv_head=4
 n_heads=4
-batch_size=6
+batch_size=3
 steps=1160
 lr=0.06250
 wd=0.12062
@@ -43,7 +43,7 @@ echo "width: ${width}, n_heads: ${n_heads}, n_kv_head: ${n_kv_head}, lr: ${lr}, 
             --beta2=0.95 \
             --grad_clip=1.0 \
             --decay_lr=False \
-            --device='cuda' \
+            --device='cuda:0' \
             --dtype='bfloat16' \
             --compile=False
 
