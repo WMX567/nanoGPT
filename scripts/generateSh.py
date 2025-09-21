@@ -76,39 +76,35 @@ def generate_sh_scripts():
                 echo "grad_accum_steps: ${{grad_accum_steps}}"
                 echo "output_dir: ${{out_dir}}"
 
-                python /scratch1/mengxiwu/nanoGPT/mu_transfer.py \\
-                    --out_dir=${{out_dir}} \\
-                    --n_embd=${{width}} \\
-                    --n_layer=${{n_layers}} \\
-                    --n_head=${{n_heads}} \\
-                    --n_kv_head=${{n_kv_head}} \\
-                    --batch_size=${{batch_size}} \\
-                    --max_iters=${{steps}} \\
-                    --learning_rate=${{lr}} \\
-                    --weight_decay=${{wd}} \\
-                    --seed=${{seed}} \\
-                    --block_size=1024 \\
-                    --dropout=0.0 \\
-                    --bias=False \\
-                    --init_std=0.02 \\
-                    --beta1=0.9 \\
-                    --beta2=0.95 \\
-                    --grad_clip=1.0 \\
-                    --decay_lr=False \\
-                    --device='cuda' \\
-                    --dtype='bfloat16' \\
-                    --impl='mengxi_impl' \\
-                    --compile=False \\
+                python mu_transfer.py \\
+                --out_dir=${{out_dir}} \\
+                --n_embd=${{width}} \
+                --n_layer=${{n_layers}} \
+                --n_head=${{n_heads}} \
+                --n_kv_head=${{n_kv_head}} \
+                --batch_size=${{batch_size}} \
+                --max_iters=${{steps}} \
+                --learning_rate=${{lr}} \
+                --weight_decay=${{wd}} \
+                --seed=${{seed}} \
+                --block_size=1024 \
+                --dropout=0.0 \
+                --bias=False \
+                --init_std=0.02 \
+                --beta1=0.9 \
+                --beta2=0.95 \
+                --grad_clip=1.0 \
+                --decay_lr=False \
+                --device='cuda:0' \
+                --dtype='bfloat16' \
+                --compile=False
 
                 echo "Training completed for w${{width}}_h${{n_heads}}_lr${{lr}}_wd${{wd}}_s${{seed}}"
                 """
                 
-                # 写入脚本文件
                 with open(script_path, 'w') as f:
                     f.write(script_content)
                 
-                print(f"Generated: {script_name}")
-
     submit_all_script = os.path.join(output_dir, "submit_all.sh")
     with open(submit_all_script, 'w') as f:
         f.write("#!/bin/bash\n")
