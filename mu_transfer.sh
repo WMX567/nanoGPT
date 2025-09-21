@@ -35,7 +35,7 @@ echo "width: ${width}, n_heads: ${n_heads}, n_kv_head: ${n_kv_head}, lr: ${lr}, 
             --learning_rate=${lr} \
             --weight_decay=${wd} \
             --seed=${seed} \
-            --block_size=2048 \
+            --block_size=1024 \
             --dropout=0.0 \
             --bias=False \
             --init_std=0.02 \
