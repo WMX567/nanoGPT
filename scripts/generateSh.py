@@ -8,7 +8,7 @@ def generate_sh_scripts():
     n_layers = 3
     n_kv_head = 2
     n_heads_list = [4, 6, 8, 16]
-    batch_list = [3, 3, 3, 3]
+    batch_list = [12, 17, 22, 42]
     steps_list = [1160, 1715, 2356, 4754]
     
     # learning rates: 2^{-4} to 2^{-8}
@@ -55,9 +55,6 @@ def generate_sh_scripts():
                 lr={lr:.5f}
                 wd={wd:.5f}
                 seed={seed}
-                
-                # 注意：你的脚本中引用了 grad_accum_steps 但没有定义它，这里我把它移除了
-                # 如果你需要这个参数，请在这里定义它，例如 grad_accum_steps=8
 
                 out_dir=mu_transfer_results/w${{width}}_h${{n_heads}}_lr${{lr}}_wd${{wd}}_s${{seed}}
                 mkdir -p ${{out_dir}}
