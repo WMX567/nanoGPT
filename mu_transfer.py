@@ -148,10 +148,11 @@ def main():
     model.to(device)
 
     if args.compile:
-        if global_rank == 0:
-            print("Compiling the model... (this may take a minute)")
-        model = torch.compile(model)
-
+        # Check if the GPU is capable enough for the Triton compiler
+        cuda_capability = torch.cuda.get_device_capability()
+        if cuda_capability[0] >= 7:
+            model = torch.compile(model)
+        
     if use_ddp:
         model = DDP(model, device_ids=[local_rank])
 
