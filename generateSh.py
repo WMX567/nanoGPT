@@ -11,10 +11,8 @@ def generate_sh_scripts():
     batch_list = [12, 17, 22, 42]
     steps_list = [1160, 1715, 2356, 4754]
     
-    # learning rates: 2^{-4} to 2^{-8}
-    lrs = [0.06250, 0.03125, 0.01563, 0.00781, 0.00391]
-    weight_decays = [0.12062, 0.24125, 0.48250, 0.96500, 1.92999]
-    
+    # learning rates: 2^{-6} to 2^{-12}
+    lrs = [0.01563, 0.00781, 0.00391, 0.00195, 0.00098, 0.00049, 0.00024]
     seeds = [0, 1, 2]
     
     output_dir = "../generated_scripts"
@@ -28,7 +26,9 @@ def generate_sh_scripts():
             batch_size = batch_list[idx]
             steps = steps_list[idx]
             
-            for lr, wd in zip(lrs, weight_decays):
+            for lr in lrs:
+
+                wd = 1/steps/lr/0.035
                 script_count += 1
                 script_name = f"mu_transfer_w{width}_h{n_heads}_lr{lr:.5f}_wd{wd:.5f}_s{seed}.sh"
                 script_path = os.path.join(output_dir, script_name)
@@ -56,7 +56,7 @@ def generate_sh_scripts():
                     f.write(f'wd={wd:.5f}\n')
                     f.write(f'seed={seed}\n')
                     f.write('\n')
-                    f.write('out_dir=mu_transfer_results/w${width}_h${n_heads}_lr${lr}_wd${wd}_s${seed}\n')
+                    f.write('out_dir=mu_transfer_results\n')
                     f.write('mkdir -p ${out_dir}\n')
                     f.write('\n')
                     f.write('echo "Starting training with parameters:"\n')
@@ -97,7 +97,8 @@ def generate_sh_scripts():
         for seed in seeds:
             for idx, width in enumerate(widths):
                 n_heads = n_heads_list[idx]
-                for lr, wd in zip(lrs, weight_decays):
+                for lr in lrs:
+                    wd = 1/steps_list[idx]/lr/0.035
                     script_name = f"mu_transfer_w{width}_h{n_heads}_lr{lr:.5f}_wd{wd:.5f}_s{seed}.sh"
                     f.write(f'sbatch {script_name}\n')
         f.write('\n')
