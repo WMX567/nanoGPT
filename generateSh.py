@@ -15,7 +15,7 @@ def generate_sh_scripts():
     lrs = [0.01563, 0.00781, 0.00391, 0.00195, 0.00098, 0.00049, 0.00024]
     seeds = [0, 1, 2]
     
-    output_dir = "../generated_scripts"
+    output_dir = "generated_scripts"
     os.makedirs(output_dir, exist_ok=True)
     
     script_count = 0
