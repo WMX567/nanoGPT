@@ -229,7 +229,7 @@ gptconf = GPTConfig(**model_args)
 model = GPT(gptconf)
 
 if coord_check:
-    from coordinate_checking import get_hooks, get_moe_hooks
+    from coordinate_checking import get_hooks
     data = {}
     hooks = []
 
@@ -252,10 +252,6 @@ if coord_check:
             hooks.append(hook)
         else:
             mlp = layer.ffn
-
-            forward_hook = get_moe_hooks(data, f"moe.{i}", n_experts=num_experts)
-            hook = mlp.register_forward_hook(forward_hook)
-            hooks.append(hook)
 
             if hasattr(mlp, 'w_gating'):
                 fc = mlp.w_gating
