@@ -13,11 +13,6 @@ now=$(date +%Y-%m-%d_%H-%M-%S)
 out_dir=coord-check-impl/${now}
 mkdir -p ${out_dir}
 
-
-
-
-# Fixed sweep table: Width Depth Heads HeadSize KV_Heads KV_Reps
-
 widths=(512 768 1024 1536 2048 3072 4096)
 depths=(3 3 3 3 3 3 3)
 heads=(4 6 8 12 16 24 32)

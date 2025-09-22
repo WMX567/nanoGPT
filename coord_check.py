@@ -232,6 +232,11 @@ if coord_check:
     from coordinate_checking import get_hooks, get_moe_hooks
     data = {}
     hooks = []
+
+    m = model.config.mup_multiplier
+    n = model.config.n_embd // model.config.n_head
+    r = model.config.n_head // model.config.n_kv_head
+
     for i, layer in enumerate(model.transformer.h):
         if not use_moe:
             mlp = layer.ffn
@@ -269,11 +274,13 @@ if coord_check:
                 hooks.append(hook)
 
         attn = layer.attn
-        forward_hook = get_hooks(data, f"attn.c_q.{i}")
+        # q: sn_key='q', m, n
+        forward_hook = get_hooks(data, f"attn.c_q.{i}", sn_key='q', m=m, n=n)
         hook = attn.c_q.register_forward_hook(forward_hook)
         hooks.append(hook)
 
-        forward_hook = get_hooks(data, f"attn.c_kv.{i}")
+        # k: sn_key='k', m, n, r
+        forward_hook = get_hooks(data, f"attn.c_kv.{i}", sn_key='k', m=m, n=n, r=r)
         hook = attn.c_kv.register_forward_hook(forward_hook)
         hooks.append(hook)
 
