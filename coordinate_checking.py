@@ -36,7 +36,7 @@ def natural_spectral_norm(A: torch.Tensor, return_list=False, transpose_weights=
         elif key == 'k':
             if not all(k in kwargs for k in ('m', 'n', 'r')):
                 raise ValueError("spectral_norm_dict['k'] requires m, n, r (mup_multiplier, n_embd // n_head, n_head // n_kv_head)")
-            scale = spectral_norm_dict['k'](kwargs['m'], kwargs['n'], kwargs['r'])
+            scale = 1/spectral_norm_dict['k'](kwargs['m'], kwargs['n'], kwargs['r'])
         elif key == 'v':
             if not all(k in kwargs for k in ('m', 'r')):
                 raise ValueError("spectral_norm_dict['v'] requires m, r (mup_multiplier, n_head // n_kv_head)")
