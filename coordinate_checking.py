@@ -122,7 +122,6 @@ def get_hooks(data: dict, key: str, sn_key=None, m=None, n=None, r=None) -> tupl
     last_weight = None
     last_bias = None
 
-
     def forward_hook(module, input, _):
         nonlocal last_input, last_weight, last_bias
 
