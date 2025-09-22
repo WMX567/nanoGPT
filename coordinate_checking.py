@@ -327,4 +327,4 @@ def analyze_folder(folder_path: str = "2025-09-20_18-36-08"):
     return df
 
 # Example usage:
-df = analyze_folder("2025-09-20_18-36-08")
+# df = analyze_folder("2025-09-20_18-36-08")
