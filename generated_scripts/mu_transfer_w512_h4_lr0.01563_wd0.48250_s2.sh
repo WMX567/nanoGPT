@@ -2,7 +2,7 @@
 #SBATCH --partition=gpu
 #SBATCH --time=12:00:00
 #SBATCH --gres=gpu:1
-#SBATCH --mem=64G 
+#SBATCH --mem=64G
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
 #SBATCH --output=mu_transfer_w512_h4_lr0.01563_wd0.48250_s2.out
@@ -14,7 +14,7 @@ width=512
 n_layers=3
 n_kv_head=2
 n_heads=4
-batch_size=3
+batch_size=12
 steps=1160
 lr=0.01563
 wd=0.48250
@@ -47,8 +47,8 @@ python /scratch1/mengxiwu/nanoGPT/mu_transfer.py \
     --beta2=0.95 \
     --grad_clip=1.0 \
     --decay_lr=False \
-    --device='cuda:0' \
-    --dtype='bfloat16' \
+    --device="cuda:0" \
+    --dtype="bfloat16" \
     --compile=False
 
 echo "Training completed for w${width}_h${n_heads}_lr${lr}_wd${wd}_s${seed}"
