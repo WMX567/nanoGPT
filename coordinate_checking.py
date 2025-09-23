@@ -15,60 +15,12 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
-def spectral_norm_svd(A: torch.Tensor) -> float:
-    # return torch.linalg.matrix_norm(A, ord=2)
-    return torch.linalg.svdvals(A.to(torch.float32)).max()
-
-def natural_spectral_norm(A: torch.Tensor, return_list=False, transpose_weights=False, **kwargs) -> float | torch.Tensor:
-    # return torch.linalg.matrix_norm(A, ord='fro')
-    if len(A.shape) == 3:
-        norms = []
-        for matrix in A:
-            if transpose_weights:
-                scale_factor = math.sqrt(matrix.size(0) / matrix.size(1))
-            else:
-                scale_factor = math.sqrt(matrix.size(1) / matrix.size(0)) 
-            norms.append(spectral_norm_svd(matrix) * scale_factor)
-        if return_list:
-            return norms
-        else:
-            return torch.tensor(norms).mean()
-    if transpose_weights:
-        return spectral_norm_svd(A) * math.sqrt(A.size(0) / A.size(1))
-    else:
-        return spectral_norm_svd(A) * math.sqrt(A.size(1) / A.size(0))
-
-
-# spectral_norm_dict = {'q': lambda m, n: 1 / math.sqrt(m*n), 
-#                       'k': lambda m, n, r: math.sqrt(r / (m*n)), 
-#                       'v': lambda m, r: math.sqrt(r / m)}
-
 # def spectral_norm_svd(A: torch.Tensor) -> float:
+#     # return torch.linalg.matrix_norm(A, ord=2)
 #     return torch.linalg.svdvals(A.to(torch.float32)).max()
 
-# def natural_spectral_norm(A: torch.Tensor, return_list=False, transpose_weights=False, key=None, **kwargs) -> float | torch.Tensor:
-
-#     # For muP scaling, require correct arguments for each key
-#     if key in spectral_norm_dict:
-#         # q: needs m, n
-#         # k: needs m, n, r
-#         # v: needs m, r
-#         if key == 'q':
-#             if not all(k in kwargs for k in ('m', 'n')):
-#                 raise ValueError("spectral_norm_dict['q'] requires m and n (mup_multiplier, n_embd // n_head)")
-#             scale = 1/spectral_norm_dict['q'](kwargs['m'], kwargs['n'])
-#         elif key == 'k':
-#             if not all(k in kwargs for k in ('m', 'n', 'r')):
-#                 raise ValueError("spectral_norm_dict['k'] requires m, n, r (mup_multiplier, n_embd // n_head, n_head // n_kv_head)")
-#             scale = 1/spectral_norm_dict['k'](kwargs['m'], kwargs['n'], kwargs['r'])
-#         elif key == 'v':
-#             if not all(k in kwargs for k in ('m', 'r')):
-#                 raise ValueError("spectral_norm_dict['v'] requires m, r (mup_multiplier, n_head // n_kv_head)")
-#             scale = 1/spectral_norm_dict['v'](kwargs['m'], kwargs['r'])
-#         else:
-#             raise ValueError(f"Unknown key for spectral_norm_dict: {key}")
-#         return scale * spectral_norm_svd(A)
-
+# def natural_spectral_norm(A: torch.Tensor, return_list=False, transpose_weights=False, **kwargs) -> float | torch.Tensor:
+#     # return torch.linalg.matrix_norm(A, ord='fro')
 #     if len(A.shape) == 3:
 #         norms = []
 #         for matrix in A:
@@ -77,16 +29,59 @@ def natural_spectral_norm(A: torch.Tensor, return_list=False, transpose_weights=
 #             else:
 #                 scale_factor = math.sqrt(matrix.size(1) / matrix.size(0)) 
 #             norms.append(spectral_norm_svd(matrix) * scale_factor)
-
 #         if return_list:
 #             return norms
 #         else:
 #             return torch.tensor(norms).mean()
-        
 #     if transpose_weights:
 #         return spectral_norm_svd(A) * math.sqrt(A.size(0) / A.size(1))
 #     else:
 #         return spectral_norm_svd(A) * math.sqrt(A.size(1) / A.size(0))
+
+
+spectral_norm_dict = {'q': lambda m, n: 1 / math.sqrt(m*n), 
+                      'k': lambda m, n, r: math.sqrt(r / (m*n)), 
+                      'v': lambda m, r: math.sqrt(r / m)}
+
+def spectral_norm_svd(A: torch.Tensor) -> float:
+    return torch.linalg.svdvals(A.to(torch.float32)).max()
+
+def scale_factor_compute(A: torch.Tensor, key: str, transpose_weights: bool, **kwargs) -> float:
+    if key == 'q':
+        if not all(k in kwargs for k in ('m', 'n')):
+            raise ValueError("spectral_norm_dict['q'] requires m and n (mup_multiplier, n_embd // n_head)")
+        scale_factor = 1/spectral_norm_dict['q'](kwargs['m'], kwargs['n'])
+    elif key == 'k':
+        if not all(k in kwargs for k in ('m', 'n', 'r')):
+            raise ValueError("spectral_norm_dict['k'] requires m, n, r (mup_multiplier, n_embd // n_head, n_head // n_kv_head)")
+        scale_factor = 1/spectral_norm_dict['k'](kwargs['m'], kwargs['n'], kwargs['r'])
+    elif key == 'v':
+        if not all(k in kwargs for k in ('m', 'r')):
+            raise ValueError("spectral_norm_dict['v'] requires m, r (mup_multiplier, n_head // n_kv_head)")
+        scale_factor = 1/spectral_norm_dict['v'](kwargs['m'], kwargs['r'])
+    elif transpose_weights:
+        scale_factor = math.sqrt(A.size(0) / A.size(1))
+    else:
+        scale_factor = math.sqrt(A.size(1) / A.size(0))
+    return scale_factor
+
+def natural_spectral_norm(A: torch.Tensor, return_list=False, transpose_weights=False, key=None, **kwargs) -> float | torch.Tensor:
+
+    scale_factor = 1.0
+    
+    if len(A.shape) == 3:
+        norms = []
+        for matrix in A:
+            # scale_factor = scale_factor_compute(matrix, key, transpose_weights, **kwargs)
+            norms.append(spectral_norm_svd(matrix) * scale_factor)
+
+        if return_list:
+            return norms
+        else:
+            return torch.tensor(norms).mean()
+        
+    # scale_factor = scale_factor_compute(A, key, transpose_weights, **kwargs)
+    return spectral_norm_svd(A) * scale_factor
 
 @dataclass
 class DataRow:
@@ -356,4 +351,4 @@ def analyze_folder(folder_path: str = "2025-09-20_18-36-08"):
     return df
 
 # Example usage:
-df = analyze_folder("2025-09-22_12-20-40")
+df = analyze_folder("2025-09-22_17-39-39")
