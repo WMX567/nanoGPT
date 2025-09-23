@@ -8,7 +8,7 @@ def generate_sh_scripts():
     n_layers = 3
     n_kv_head = 2
     n_heads_list = [4, 6, 8, 16]
-    batch_list = [12, 17, 22, 12]
+    batch_list = [12, 17, 22, 6]
     steps_list = [1160, 1715, 2356, 4754]
     
     # learning rates: 2^{-6} to 2^{-12}
