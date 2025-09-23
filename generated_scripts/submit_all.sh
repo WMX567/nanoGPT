@@ -1,6 +1,7 @@
 #!/bin/bash
 # This script submits all generated jobs to SLURM
 
+<<<<<<< HEAD
 # sbatch mu_transfer_w512_h4_lr0.01563_wd1.57585_s0.sh
 # sbatch mu_transfer_w512_h4_lr0.00781_wd3.15372_s0.sh
 # sbatch mu_transfer_w512_h4_lr0.00391_wd6.29937_s0.sh
@@ -22,12 +23,33 @@
 # sbatch mu_transfer_w1024_h8_lr0.00098_wd12.37458_s0.sh
 # sbatch mu_transfer_w1024_h8_lr0.00049_wd24.74917_s0.sh
 # sbatch mu_transfer_w1024_h8_lr0.00024_wd50.52955_s0.sh
+=======
+sbatch mu_transfer_w512_h4_lr0.01563_wd1.57585_s0.sh
+sbatch mu_transfer_w512_h4_lr0.00781_wd3.15372_s0.sh
+sbatch mu_transfer_w512_h4_lr0.00391_wd6.29937_s0.sh
+sbatch mu_transfer_w512_h4_lr0.00195_wd12.63105_s0.sh
+sbatch mu_transfer_w512_h4_lr0.00098_wd25.13321_s0.sh
+sbatch mu_transfer_w512_h4_lr0.00049_wd50.26641_s0.sh
+sbatch mu_transfer_w768_h6_lr0.01563_wd1.06588_s0.sh
+sbatch mu_transfer_w768_h6_lr0.00781_wd2.13313_s0.sh
+sbatch mu_transfer_w768_h6_lr0.00391_wd4.26080_s0.sh
+sbatch mu_transfer_w768_h6_lr0.00195_wd8.54345_s0.sh
+sbatch mu_transfer_w768_h6_lr0.00098_wd16.99972_s0.sh
+sbatch mu_transfer_w768_h6_lr0.00049_wd33.99944_s0.sh
+sbatch mu_transfer_w1024_h8_lr0.01563_wd0.77589_s0.sh
+sbatch mu_transfer_w1024_h8_lr0.00781_wd1.55276_s0.sh
+sbatch mu_transfer_w1024_h8_lr0.00391_wd3.10156_s0.sh
+sbatch mu_transfer_w1024_h8_lr0.00195_wd6.21902_s0.sh
+sbatch mu_transfer_w1024_h8_lr0.00098_wd12.37458_s0.sh
+sbatch mu_transfer_w1024_h8_lr0.00049_wd24.74917_s0.sh
+>>>>>>> 56a889e (test)
 sbatch mu_transfer_w2048_h16_lr0.01563_wd0.38452_s0.sh
 sbatch mu_transfer_w2048_h16_lr0.00781_wd0.76952_s0.sh
 sbatch mu_transfer_w2048_h16_lr0.00391_wd1.53708_s0.sh
 sbatch mu_transfer_w2048_h16_lr0.00195_wd3.08204_s0.sh
 sbatch mu_transfer_w2048_h16_lr0.00098_wd6.13263_s0.sh
 sbatch mu_transfer_w2048_h16_lr0.00049_wd12.26526_s0.sh
+<<<<<<< HEAD
 sbatch mu_transfer_w2048_h16_lr0.00024_wd25.04157_s0.sh
 # sbatch mu_transfer_w512_h4_lr0.01563_wd1.57585_s1.sh
 # sbatch mu_transfer_w512_h4_lr0.00781_wd3.15372_s1.sh
@@ -50,12 +72,33 @@ sbatch mu_transfer_w2048_h16_lr0.00024_wd25.04157_s0.sh
 # sbatch mu_transfer_w1024_h8_lr0.00098_wd12.37458_s1.sh
 # sbatch mu_transfer_w1024_h8_lr0.00049_wd24.74917_s1.sh
 # sbatch mu_transfer_w1024_h8_lr0.00024_wd50.52955_s1.sh
+=======
+sbatch mu_transfer_w512_h4_lr0.01563_wd1.57585_s1.sh
+sbatch mu_transfer_w512_h4_lr0.00781_wd3.15372_s1.sh
+sbatch mu_transfer_w512_h4_lr0.00391_wd6.29937_s1.sh
+sbatch mu_transfer_w512_h4_lr0.00195_wd12.63105_s1.sh
+sbatch mu_transfer_w512_h4_lr0.00098_wd25.13321_s1.sh
+sbatch mu_transfer_w512_h4_lr0.00049_wd50.26641_s1.sh
+sbatch mu_transfer_w768_h6_lr0.01563_wd1.06588_s1.sh
+sbatch mu_transfer_w768_h6_lr0.00781_wd2.13313_s1.sh
+sbatch mu_transfer_w768_h6_lr0.00391_wd4.26080_s1.sh
+sbatch mu_transfer_w768_h6_lr0.00195_wd8.54345_s1.sh
+sbatch mu_transfer_w768_h6_lr0.00098_wd16.99972_s1.sh
+sbatch mu_transfer_w768_h6_lr0.00049_wd33.99944_s1.sh
+sbatch mu_transfer_w1024_h8_lr0.01563_wd0.77589_s1.sh
+sbatch mu_transfer_w1024_h8_lr0.00781_wd1.55276_s1.sh
+sbatch mu_transfer_w1024_h8_lr0.00391_wd3.10156_s1.sh
+sbatch mu_transfer_w1024_h8_lr0.00195_wd6.21902_s1.sh
+sbatch mu_transfer_w1024_h8_lr0.00098_wd12.37458_s1.sh
+sbatch mu_transfer_w1024_h8_lr0.00049_wd24.74917_s1.sh
+>>>>>>> 56a889e (test)
 sbatch mu_transfer_w2048_h16_lr0.01563_wd0.38452_s1.sh
 sbatch mu_transfer_w2048_h16_lr0.00781_wd0.76952_s1.sh
 sbatch mu_transfer_w2048_h16_lr0.00391_wd1.53708_s1.sh
 sbatch mu_transfer_w2048_h16_lr0.00195_wd3.08204_s1.sh
 sbatch mu_transfer_w2048_h16_lr0.00098_wd6.13263_s1.sh
 sbatch mu_transfer_w2048_h16_lr0.00049_wd12.26526_s1.sh
+<<<<<<< HEAD
 sbatch mu_transfer_w2048_h16_lr0.00024_wd25.04157_s1.sh
 # sbatch mu_transfer_w512_h4_lr0.01563_wd1.57585_s2.sh
 # sbatch mu_transfer_w512_h4_lr0.00781_wd3.15372_s2.sh
@@ -78,12 +121,31 @@ sbatch mu_transfer_w2048_h16_lr0.00024_wd25.04157_s1.sh
 # sbatch mu_transfer_w1024_h8_lr0.00098_wd12.37458_s2.sh
 # sbatch mu_transfer_w1024_h8_lr0.00049_wd24.74917_s2.sh
 # sbatch mu_transfer_w1024_h8_lr0.00024_wd50.52955_s2.sh
+=======
+sbatch mu_transfer_w512_h4_lr0.01563_wd1.57585_s2.sh
+sbatch mu_transfer_w512_h4_lr0.00781_wd3.15372_s2.sh
+sbatch mu_transfer_w512_h4_lr0.00391_wd6.29937_s2.sh
+sbatch mu_transfer_w512_h4_lr0.00195_wd12.63105_s2.sh
+sbatch mu_transfer_w512_h4_lr0.00098_wd25.13321_s2.sh
+sbatch mu_transfer_w512_h4_lr0.00049_wd50.26641_s2.sh
+sbatch mu_transfer_w768_h6_lr0.01563_wd1.06588_s2.sh
+sbatch mu_transfer_w768_h6_lr0.00781_wd2.13313_s2.sh
+sbatch mu_transfer_w768_h6_lr0.00391_wd4.26080_s2.sh
+sbatch mu_transfer_w768_h6_lr0.00195_wd8.54345_s2.sh
+sbatch mu_transfer_w768_h6_lr0.00098_wd16.99972_s2.sh
+sbatch mu_transfer_w768_h6_lr0.00049_wd33.99944_s2.sh
+sbatch mu_transfer_w1024_h8_lr0.01563_wd0.77589_s2.sh
+sbatch mu_transfer_w1024_h8_lr0.00781_wd1.55276_s2.sh
+sbatch mu_transfer_w1024_h8_lr0.00391_wd3.10156_s2.sh
+sbatch mu_transfer_w1024_h8_lr0.00195_wd6.21902_s2.sh
+sbatch mu_transfer_w1024_h8_lr0.00098_wd12.37458_s2.sh
+sbatch mu_transfer_w1024_h8_lr0.00049_wd24.74917_s2.sh
+>>>>>>> 56a889e (test)
 sbatch mu_transfer_w2048_h16_lr0.01563_wd0.38452_s2.sh
 sbatch mu_transfer_w2048_h16_lr0.00781_wd0.76952_s2.sh
 sbatch mu_transfer_w2048_h16_lr0.00391_wd1.53708_s2.sh
 sbatch mu_transfer_w2048_h16_lr0.00195_wd3.08204_s2.sh
 sbatch mu_transfer_w2048_h16_lr0.00098_wd6.13263_s2.sh
 sbatch mu_transfer_w2048_h16_lr0.00049_wd12.26526_s2.sh
-sbatch mu_transfer_w2048_h16_lr0.00024_wd25.04157_s2.sh
 
-echo "Submitted 84 jobs to SLURM"
+echo "Submitted 72 jobs to SLURM"

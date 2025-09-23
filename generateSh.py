@@ -8,11 +8,10 @@ def generate_sh_scripts():
     n_layers = 3
     n_kv_head = 2
     n_heads_list = [4, 6, 8, 16]
-    batch_list = [12, 17, 22, 6]
+    batch_list = [6, 6, 6, 6]
     steps_list = [1160, 1715, 2356, 4754]
     
-    # learning rates: 2^{-6} to 2^{-12}
-    lrs = [0.01563, 0.00781, 0.00391, 0.00195, 0.00098, 0.00049, 0.00024]
+    lrs = [0.01563, 0.00781, 0.00391, 0.00195, 0.00098, 0.00049]
     seeds = [0, 1, 2]
     
     output_dir = "generated_scripts"
@@ -74,6 +73,7 @@ def generate_sh_scripts():
                     f.write('    --batch_size=${batch_size} \\\n')
                     f.write('    --max_iters=${steps} \\\n')
                     f.write('    --learning_rate=${lr} \\\n')
+                    f.write('    --gradient_accumulation_steps=${batch_size} \\\n')
                     f.write('    --weight_decay=${wd} \\\n')
                     f.write('    --seed=${seed} \\\n')
                     f.write('    --block_size=1024 \\\n')

@@ -14,7 +14,7 @@ width=1024
 n_layers=3
 n_kv_head=2
 n_heads=8
-batch_size=22
+batch_size=6
 steps=2356
 lr=0.00049
 wd=24.74917
@@ -38,6 +38,7 @@ python /scratch1/mengxiwu/nanoGPT/mu_transfer.py \
     --batch_size=${batch_size} \
     --max_iters=${steps} \
     --learning_rate=${lr} \
+    --gradient_accumulation_steps=${batch_size} \
     --weight_decay=${wd} \
     --seed=${seed} \
     --block_size=1024 \

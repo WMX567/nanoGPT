@@ -38,6 +38,7 @@ python /scratch1/mengxiwu/nanoGPT/mu_transfer.py \
     --batch_size=${batch_size} \
     --max_iters=${steps} \
     --learning_rate=${lr} \
+    --gradient_accumulation_steps=${batch_size} \
     --weight_decay=${wd} \
     --seed=${seed} \
     --block_size=1024 \
