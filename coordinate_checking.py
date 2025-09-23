@@ -15,36 +15,12 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
-spectral_norm_dict = {'q': lambda m, n: 1 / math.sqrt(m*n), 
-                      'k': lambda m, n, r: math.sqrt(r / (m*n)), 
-                      'v': lambda m, r: math.sqrt(r / m)}
-
 def spectral_norm_svd(A: torch.Tensor) -> float:
+    # return torch.linalg.matrix_norm(A, ord=2)
     return torch.linalg.svdvals(A.to(torch.float32)).max()
 
-def natural_spectral_norm(A: torch.Tensor, return_list=False, transpose_weights=False, key=None, **kwargs) -> float | torch.Tensor:
-
-    # For muP scaling, require correct arguments for each key
-    if key in spectral_norm_dict:
-        # q: needs m, n
-        # k: needs m, n, r
-        # v: needs m, r
-        if key == 'q':
-            if not all(k in kwargs for k in ('m', 'n')):
-                raise ValueError("spectral_norm_dict['q'] requires m and n (mup_multiplier, n_embd // n_head)")
-            scale = 1/spectral_norm_dict['q'](kwargs['m'], kwargs['n'])
-        elif key == 'k':
-            if not all(k in kwargs for k in ('m', 'n', 'r')):
-                raise ValueError("spectral_norm_dict['k'] requires m, n, r (mup_multiplier, n_embd // n_head, n_head // n_kv_head)")
-            scale = 1/spectral_norm_dict['k'](kwargs['m'], kwargs['n'], kwargs['r'])
-        elif key == 'v':
-            if not all(k in kwargs for k in ('m', 'r')):
-                raise ValueError("spectral_norm_dict['v'] requires m, r (mup_multiplier, n_head // n_kv_head)")
-            scale = 1/spectral_norm_dict['v'](kwargs['m'], kwargs['r'])
-        else:
-            raise ValueError(f"Unknown key for spectral_norm_dict: {key}")
-        return scale * spectral_norm_svd(A)
-
+def natural_spectral_norm(A: torch.Tensor, return_list=False, transpose_weights=False, **kwargs) -> float | torch.Tensor:
+    # return torch.linalg.matrix_norm(A, ord='fro')
     if len(A.shape) == 3:
         norms = []
         for matrix in A:
@@ -53,16 +29,64 @@ def natural_spectral_norm(A: torch.Tensor, return_list=False, transpose_weights=
             else:
                 scale_factor = math.sqrt(matrix.size(1) / matrix.size(0)) 
             norms.append(spectral_norm_svd(matrix) * scale_factor)
-
         if return_list:
             return norms
         else:
             return torch.tensor(norms).mean()
-        
     if transpose_weights:
         return spectral_norm_svd(A) * math.sqrt(A.size(0) / A.size(1))
     else:
         return spectral_norm_svd(A) * math.sqrt(A.size(1) / A.size(0))
+
+
+# spectral_norm_dict = {'q': lambda m, n: 1 / math.sqrt(m*n), 
+#                       'k': lambda m, n, r: math.sqrt(r / (m*n)), 
+#                       'v': lambda m, r: math.sqrt(r / m)}
+
+# def spectral_norm_svd(A: torch.Tensor) -> float:
+#     return torch.linalg.svdvals(A.to(torch.float32)).max()
+
+# def natural_spectral_norm(A: torch.Tensor, return_list=False, transpose_weights=False, key=None, **kwargs) -> float | torch.Tensor:
+
+#     # For muP scaling, require correct arguments for each key
+#     if key in spectral_norm_dict:
+#         # q: needs m, n
+#         # k: needs m, n, r
+#         # v: needs m, r
+#         if key == 'q':
+#             if not all(k in kwargs for k in ('m', 'n')):
+#                 raise ValueError("spectral_norm_dict['q'] requires m and n (mup_multiplier, n_embd // n_head)")
+#             scale = 1/spectral_norm_dict['q'](kwargs['m'], kwargs['n'])
+#         elif key == 'k':
+#             if not all(k in kwargs for k in ('m', 'n', 'r')):
+#                 raise ValueError("spectral_norm_dict['k'] requires m, n, r (mup_multiplier, n_embd // n_head, n_head // n_kv_head)")
+#             scale = 1/spectral_norm_dict['k'](kwargs['m'], kwargs['n'], kwargs['r'])
+#         elif key == 'v':
+#             if not all(k in kwargs for k in ('m', 'r')):
+#                 raise ValueError("spectral_norm_dict['v'] requires m, r (mup_multiplier, n_head // n_kv_head)")
+#             scale = 1/spectral_norm_dict['v'](kwargs['m'], kwargs['r'])
+#         else:
+#             raise ValueError(f"Unknown key for spectral_norm_dict: {key}")
+#         return scale * spectral_norm_svd(A)
+
+#     if len(A.shape) == 3:
+#         norms = []
+#         for matrix in A:
+#             if transpose_weights:
+#                 scale_factor = math.sqrt(matrix.size(0) / matrix.size(1))
+#             else:
+#                 scale_factor = math.sqrt(matrix.size(1) / matrix.size(0)) 
+#             norms.append(spectral_norm_svd(matrix) * scale_factor)
+
+#         if return_list:
+#             return norms
+#         else:
+#             return torch.tensor(norms).mean()
+        
+#     if transpose_weights:
+#         return spectral_norm_svd(A) * math.sqrt(A.size(0) / A.size(1))
+#     else:
+#         return spectral_norm_svd(A) * math.sqrt(A.size(1) / A.size(0))
 
 @dataclass
 class DataRow:
@@ -249,40 +273,47 @@ def read_coord_check_data(folder_path: str) -> pd.DataFrame:
     combined_df = pd.concat(all_dataframes, ignore_index=True)
     return combined_df
 
-# --- New function: plot_input_weight_norm_vs_width ---
-def plot_input_weight_norm_vs_width(df: pd.DataFrame, save_path: str = None):
+# --- New: plot norm by group (qkv, emb, other) ---
+def plot_norms_by_group(df: pd.DataFrame, save_prefix: str = None):
     """
-    Plot input norm and weight norm vs width.
-    X: width, Y: norm (input/weight), one curve for each layer (or mean over layers).
+    Plot input norm和weight norm，分三组：q/k/v, embedding/unembedding, 其它。
+    每组单独画图。
     """
     import matplotlib.pyplot as plt
     import seaborn as sns
-    plt.figure(figsize=(10, 6))
+    # 分组定义
+    qkv_keys = ['attn.c_q', 'attn.c_kv', 'attn.c_proj']
+    emb_keys = ['wte', 'wpe', 'lm_head']
+    # 1. q/k/v group
+    def is_qkv(row):
+        return any(k in str(row['layer']) or k in str(row['tag']) or k in str(row['layer_type']) for k in qkv_keys)
+    def is_emb(row):
+        return any(k in str(row['layer']) or k in str(row['tag']) or k in str(row['layer_type']) for k in emb_keys)
+    # 2. embedding/unembedding group
+    # 3. other group
+    df['group'] = df.apply(lambda row: 'qkv' if is_qkv(row) else ('emb' if is_emb(row) else 'other'), axis=1)
 
-    # Input norm vs width, per layer
-    input_data = df[(df['layer_type'] == 'input') & (df['data_type'] == 'norm') & (df['fDf'] == 'f')]
-    if not input_data.empty:
-        for layer in sorted(input_data['layer'].unique()):
-            layer_data = input_data[input_data['layer'] == layer]
-            group = layer_data.groupby('width')['value'].mean().reset_index()
-            sns.lineplot(data=group, x='width', y='value', marker='o', label=f'Input Norm (layer {layer})')
-
-    # Weight norm vs width, per layer
-    weight_data = df[(df['layer_type'] == 'weight') & (df['data_type'] == 'norm') & (df['fDf'] == 'f')]
-    if not weight_data.empty:
-        for layer in sorted(weight_data['layer'].unique()):
-            layer_data = weight_data[weight_data['layer'] == layer]
-            group = layer_data.groupby('width')['value'].mean().reset_index()
-            sns.lineplot(data=group, x='width', y='value', marker='s', label=f'Weight Norm (layer {layer})')
-
-    plt.xlabel('Width')
-    plt.ylabel('Norm')
-    plt.title('Input Norm & Weight Norm vs Width')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"Plot saved to {save_path}")
+    for group in ['qkv', 'emb', 'other']:
+        for norm_type in ['input', 'weight']:
+            plt.figure(figsize=(10, 6))
+            sub = df[(df['group'] == group) & (df['layer_type'] == norm_type) & (df['data_type'] == 'norm') & (df['fDf'] == 'f')]
+            if sub.empty:
+                continue
+            for layer in sorted(sub['layer'].unique()):
+                layer_data = sub[sub['layer'] == layer]
+                group_data = layer_data.groupby('width')['value'].mean().reset_index()
+                marker = 'o' if norm_type == 'input' else 's'
+                sns.lineplot(data=group_data, x='width', y='value', marker=marker, label=f'{norm_type.capitalize()} Norm (layer {layer})')
+            plt.xlabel('Width')
+            plt.ylabel('Norm')
+            plt.title(f'{norm_type.capitalize()} Norm vs Width ({group})')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            if save_prefix:
+                fname = f"{save_prefix}_{group}_{norm_type}_norm.png"
+                plt.savefig(fname, dpi=300, bbox_inches='tight')
+                print(f"Plot saved to {fname}")
+            plt.show()
 
 
 def analyze_folder(folder_path: str = "2025-09-20_18-36-08"):
@@ -320,10 +351,9 @@ def analyze_folder(folder_path: str = "2025-09-20_18-36-08"):
     print(f"Unique layers: {sorted(df['layer'].unique())}")
     
     # Create plots
-    save_path = f"{folder_path}_coord_check_plots.png"
-    plot_input_weight_norm_vs_width(df, save_path)
+    plot_norms_by_group(df, save_prefix=folder_path)
     
     return df
 
 # Example usage:
-# df = analyze_folder("2025-09-20_18-36-08")
+df = analyze_folder("2025-09-22_12-20-40")
