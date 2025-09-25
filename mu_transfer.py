@@ -18,9 +18,10 @@ def seed_everything(seed=42):
     os.environ['PYTHONHASHSEED'] = str(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed) # 如果使用多GPU，应为 torch.cuda.manual_seed_all(seed)
+    torch.cuda.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
 
 def get_args():
     parser = argparse.ArgumentParser(description='Train a GPT model with muP.')
