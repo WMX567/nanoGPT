@@ -73,20 +73,24 @@ mengxi_impl = {
         # 'lr_scale':             lambda m: 1 / m,
         # 'wd_scale':             lambda m: m,
         # 'output_multiplier':    lambda n, r: math.sqrt(n / r),
-        'init_std':             lambda m, r: 1.0 / (r*m)**(1.0/2),
+        'init_std':             lambda m, r: r / m**(1.0/2),
         'lr_scale':             lambda m: 1.0 / m,
         'wd_scale':             lambda m: m,
-        'output_multiplier':    lambda m, r: r**(1.0/2)
+        'output_multiplier':    lambda m, r: 1.0 / r,
     },
     'v_layer': {
         # 'init_std':             lambda m, r: math.sqrt(r / m),
         # 'lr_scale':             lambda m: 1 / m,
         # 'wd_scale':             lambda m: m,
         # 'output_multiplier':    lambda r: 1 / math.sqrt(r),
-        'init_std':             lambda m, r: 1.0 / (r*m)**(1.0/2),
+        # 'init_std':             lambda m, r: 1.0 / ((r*m)**(1.0/2)),
+        # 'lr_scale':             lambda m: 1.0 / m,
+        # 'wd_scale':             lambda m: m,
+        # 'output_multiplier':    lambda m, r: r**(1.0/2)
+        'init_std':             lambda m, r: r / m**(1/2),
         'lr_scale':             lambda m: 1.0 / m,
         'wd_scale':             lambda m: m,
-        'output_multiplier':    lambda m, r: r**(1.0/2)
+        'output_multiplier':    lambda m, r: 1.0 / r,
     },
     'unembedding': {
         # 'init_std':             lambda m: 1.0 / m,

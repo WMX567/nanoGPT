@@ -77,7 +77,7 @@ except Exception as e:
 
 if not success:
     try:
-        success = plot_mu_transfer('mu_transfer_results', axes, 'Maximal Update Parametrization (μP)')
+        success = plot_mu_transfer('mup', axes, 'Maximal Update Parametrization (μP)')
         if success:
             print("Successfully plotted from mup directory")
     except Exception as e:
