@@ -105,7 +105,7 @@ class CausalSelfAttention(nn.Module):
 
         self.c_q = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         if 'q_layer' in self.impl:
-            q_init_std = self.impl['q_layer']['init_std'](m, n)
+            q_init_std = self.impl['q_layer']['init_std'](m)
             nn.init.normal_(self.c_q.weight, mean=0.0, std=q_init_std)
         
         # c_kv outputs 2 * (n_embd // n_kv_reps): [k, v]
@@ -116,7 +116,7 @@ class CausalSelfAttention(nn.Module):
             # Split c_kv weight for k, v
             k_dim = config.n_embd // self.n_kv_reps
             v_dim = config.n_embd // self.n_kv_reps
-            k_init_std = self.impl['k_layer']['init_std'](m, n, r)
+            k_init_std = self.impl['k_layer']['init_std'](m, r)
             v_init_std = self.impl['v_layer']['init_std'](m, r)
             # k weight initialization
             nn.init.normal_(self.c_kv.weight[:k_dim, :], mean=0.0, std=k_init_std)
@@ -167,15 +167,15 @@ class CausalSelfAttention(nn.Module):
         n = config.n_embd // config.n_head
         r = config.n_head // config.n_kv_head
         if 'q_layer' in self.impl:
-            self.q_output_mult = self.impl['q_layer']['output_multiplier'](n)
+            self.q_output_mult = self.impl['q_layer']['output_multiplier'](m)
         else:
-            self.q_output_mult = self.impl['hidden']['output_multiplier'](m)
+            self.q_output_mult = self.impl['hidden']['output_multiplier'](m,r)
         if 'k_layer' in self.impl:
-            self.k_output_mult = self.impl['k_layer']['output_multiplier'](n, r)
+            self.k_output_mult = self.impl['k_layer']['output_multiplier'](m,r)
         else:
             self.k_output_mult = self.impl['hidden']['output_multiplier'](m)
         if 'v_layer' in self.impl:
-            self.v_output_mult = self.impl['v_layer']['output_multiplier'](r)
+            self.v_output_mult = self.impl['v_layer']['output_multiplier'](m,r)
         else:
             self.v_output_mult = self.impl['hidden']['output_multiplier'](m)
 
