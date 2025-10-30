@@ -163,7 +163,9 @@ def main():
         betas=(args.beta1, args.beta2), eps=args.eps,
         device_type=device_type, adaptive_optimizer=False
     )
-    scaler = torch.cuda.amp.GradScaler('cuda',enabled=(args.dtype == 'float16'))
+    device_type = 'cuda' if torch.cuda.is_available() else 'cpu'
+    use_amp = (args.dtype == 'float16')
+    scaler = torch.amp.GradScaler(device_type, enabled=use_amp)
 
     losses = []
     t0 = time.time()
