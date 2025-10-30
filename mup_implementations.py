@@ -53,8 +53,8 @@ mengxi_impl = {
         'output_multiplier':    lambda m: 1.0
     },
     'hidden': {
-        'init_std':             lambda m: 1 / m**(1/2),
-        'lr_scale':             lambda m: 1 / m,
+        'init_std':             lambda m: 1.0 / m**(1.0/2),
+        'lr_scale':             lambda m: 1.0 / m,
         'wd_scale':             lambda m: m,
         'output_multiplier':    lambda m: 1.0
     },
@@ -63,8 +63,8 @@ mengxi_impl = {
         # 'lr_scale':             lambda m: 1 / m,
         # 'wd_scale':             lambda m: m,
         # 'output_multiplier':    lambda n: math.sqrt(n),
-        'init_std':             lambda m: 1 / m**(1/2),
-        'lr_scale':             lambda m: 1 / m,
+        'init_std':             lambda m: 1.0 / m**(1.0/2),
+        'lr_scale':             lambda m: 1.0 / m,
         'wd_scale':             lambda m: m,
         'output_multiplier':    lambda m: 1.0
     },
@@ -73,27 +73,27 @@ mengxi_impl = {
         # 'lr_scale':             lambda m: 1 / m,
         # 'wd_scale':             lambda m: m,
         # 'output_multiplier':    lambda n, r: math.sqrt(n / r),
-        'init_std':             lambda m, r: 1 / (r*m)**(1/2),
-        'lr_scale':             lambda m: 1 / m,
+        'init_std':             lambda m, r: 1.0 / (r*m)**(1.0/2),
+        'lr_scale':             lambda m: 1.0 / m,
         'wd_scale':             lambda m: m,
-        'output_multiplier':    lambda m, r: r**(1/2)
+        'output_multiplier':    lambda m, r: r**(1.0/2)
     },
     'v_layer': {
         # 'init_std':             lambda m, r: math.sqrt(r / m),
         # 'lr_scale':             lambda m: 1 / m,
         # 'wd_scale':             lambda m: m,
         # 'output_multiplier':    lambda r: 1 / math.sqrt(r),
-        'init_std':             lambda m, r: 1 / (r*m)**(1/2),
-        'lr_scale':             lambda m: 1 / m,
+        'init_std':             lambda m, r: 1.0 / (r*m)**(1.0/2),
+        'lr_scale':             lambda m: 1.0 / m,
         'wd_scale':             lambda m: m,
-        'output_multiplier':    lambda m,r: r**(1/2)
+        'output_multiplier':    lambda m, r: r**(1.0/2)
     },
     'unembedding': {
         # 'init_std':             lambda m: 1.0 / m,
         # 'lr_scale':             lambda m: 1.0 / m,
         # 'wd_scale':             lambda m: m,
         # 'output_multiplier':    lambda m: 1.0,
-        'init_std':             lambda m: 1.0 / m**(1/2),
+        'init_std':             lambda m: 1.0 / m**(1.0/2),
         'lr_scale':             lambda m: 1.0,
         'wd_scale':             lambda m: 1.0,
         'output_multiplier':    lambda m: 1.0
@@ -101,7 +101,7 @@ mengxi_impl = {
     'normalization': {
         'lr_scale':             lambda m: 1.0 / m,
     },
-    'attention_scale':          lambda d: 1 / d,
+    'attention_scale':          lambda d: 1.0 / d,
     'depth_scale':              lambda L: 1.0 / L,
 }
 
