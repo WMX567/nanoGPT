@@ -608,13 +608,13 @@ class GPT(nn.Module):
             attn = block.attn
             # Query
             if hasattr(attn, 'c_q') and hasattr(self.impl, 'q_layer'):
-                q_std = self.config.init_std * self.impl['q_layer']['init_std'](m, n)
+                q_std = self.config.init_std * self.impl['q_layer']['init_std'](m)
                 torch.nn.init.normal_(attn.c_q.weight, mean=0.0, std=q_std)
             # Key/Value
             if hasattr(attn, 'c_kv') and hasattr(self.impl, 'k_layer') and hasattr(self.impl, 'v_layer'):
                 k_dim = self.config.n_embd // attn.n_kv_reps
                 v_dim = self.config.n_embd // attn.n_kv_reps
-                k_std = self.config.init_std * self.impl['k_layer']['init_std'](m, n, r)
+                k_std = self.config.init_std * self.impl['k_layer']['init_std'](m, r)
                 v_std = self.config.init_std * self.impl['v_layer']['init_std'](m, r)
                 torch.nn.init.normal_(attn.c_kv.weight[:k_dim, :], mean=0.0, std=k_std)
                 torch.nn.init.normal_(attn.c_kv.weight[k_dim:k_dim+v_dim, :], mean=0.0, std=v_std)
