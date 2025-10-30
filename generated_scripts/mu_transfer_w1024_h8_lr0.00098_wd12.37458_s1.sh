@@ -49,7 +49,6 @@ python /scratch1/mengxiwu/nanoGPT/mu_transfer.py \
     --grad_clip=1.0 \
     --decay_lr=False \
     --device="cuda:0" \
-    --dtype="bfloat16" \
-    --compile=False
+    --dtype="float32" \
 
 echo "Training completed for w${width}_h${n_heads}_lr${lr}_wd${wd}_s${seed}"

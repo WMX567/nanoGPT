@@ -84,8 +84,7 @@ def generate_sh_scripts():
                     f.write('    --grad_clip=1.0 \\\n')
                     f.write('    --decay_lr=False \\\n')
                     f.write('    --device="cuda:0" \\\n')
-                    f.write('    --dtype="bfloat16" \\\n')
-                    f.write('    --compile=False\n')
+                    f.write('    --dtype="float32" \\\n')
                     f.write('\n')
                     f.write('echo "Training completed for w${width}_h${n_heads}_lr${lr}_wd${wd}_s${seed}"\n')
                 
