@@ -86,7 +86,7 @@ mengxi_impl = {
         'init_std':             lambda m, r: 1 / (r*m)**(1/2),
         'lr_scale':             lambda m: 1 / m,
         'wd_scale':             lambda m: m,
-        'output_multiplier':    lambda r: r**(1/2)
+        'output_multiplier':    lambda m,r: r**(1/2)
     },
     'unembedding': {
         # 'init_std':             lambda m: 1.0 / m,
